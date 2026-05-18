@@ -1,0 +1,17 @@
+[build]
+  base    = "app/frontend"
+  command = "npm install && npm run build"
+  publish = "app/frontend/dist"
+
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
+
+# 환경변수는 Netlify Site settings > Environment variables 에서 설정:
+#   VITE_API_BASE_URL      (예: https://your-tunnel.trycloudflare.com)
+#   VITE_FIREBASE_API_KEY
+#   VITE_FIREBASE_AUTH_DOMAIN
+#   VITE_FIREBASE_PROJECT_ID
+#   VITE_FIREBASE_APP_ID
+#   VITE_ALLOW_INSECURE_AUTH=false

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>yt-dlp web (HTML)</title>
+<script type="module">
+  // 동일한 백엔드 API를 호출하는 단일 파일 HTML 대안.
+  // Firebase 없이 ALLOW_INSECURE_AUTH=true 환경에서 동작.
+  // 설정은 화면 우측 상단 ⚙️에서 변경.
+
+  const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
+  const BASE = cfg.base || 'http://localhost:8000'
+
+  async function api(path, init = {}) {
+    const r = await fetch(BASE + path, { headers: { 'Content-Type': 'application/json' }, ...init })
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+    return r.json()
+  }
+
+  const $ = (sel) => document.querySelector(sel)
+  const list = $('#jobs')
+  const status = $('#status')
+
+  $('#cfgBtn').onclick = () => {
+    const v = prompt('백엔드 API URL', BASE)
+    if (v) { localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: v })); location.reload() }
+  }
+
+  $('#form').onsubmit = async (e) => {
+    e.preventDefault()
+    const url = $('#url').value.trim()
+    const quality = $('#quality').value
+    if (!url) return
+    status.textContent = '등록 중...'
+    try {
+      await api('/api/jobs', { method: 'POST', body: JSON.stringify({ url, quality }) })
+      $('#url').value = ''
+      status.textContent = '등록됨'
+      await refresh()
+    } catch (err) {
+      status.textContent = '실패: ' + err.message
+    }
+  }
+
+  async function refresh() {
+    try {
+      const jobs = await api('/api/jobs')
+      list.innerHTML = jobs.length === 0
+        ? '<li style="color:#888;text-align:center;padding:24px">작업이 없습니다.</li>'
+        : jobs.map(renderJob).join('')
+      list.querySelectorAll('[data-id]').forEach((el) => {
+        el.onclick = () => openDetail(el.dataset.id)
+      })
+    } catch (err) {
+      status.textContent = '연결 실패: ' + err.message
+    }
+  }
+
+  function renderJob(j) {
+    const pct = Math.round(j.progress * 100)
+    return `<li data-id="${j.id}" class="job">
+      <div class="row">
+        <strong>${escape(j.title || j.url)}</strong>
+        <span class="badge st-${j.status}">${j.status}</span>
+      </div>
+      <div class="meta">${escape(j.url)}</div>
+      ${j.status !== 'done' && j.status !== 'failed'
+        ? `<div class="bar"><div style="width:${pct}%"></div></div>`
+        : ''}
+      ${j.message ? `<div class="meta">${escape(j.message)}</div>` : ''}
+    </li>`
+  }
+
+  async function openDetail(id) {
+    const j = await api('/api/jobs/' + id)
+    const dlg = $('#detail')
+    $('#dTitle').textContent = j.title || j.url
+    $('#dMeta').textContent = `${j.status} · ${Math.round(j.progress * 100)}% · Gemini ${j.quality}`
+    $('#dChapters').innerHTML = j.chapters.map(c =>
+      `<li><code>${c.time}</code> <b>${escape(c.title)}</b>${c.summary ? ' — ' + escape(c.summary) : ''}</li>`).join('')
+    $('#dArtifacts').innerHTML = j.artifacts.map(a => `
+      <li>
+        <span>${escape(a.kind)} — ${escape(a.filename)}</span>
+        <a href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>다운로드</a>
+      </li>`).join('')
+    dlg.showModal()
+  }
+  $('#dClose').onclick = () => $('#detail').close()
+
+  function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+
+  refresh()
+  setInterval(refresh, 3000)
+</script>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; margin:0; padding:16px; }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  h1 { font-size:18px; margin:0 }
+  form { background:#fff; border-radius:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); padding:14px; }
+  form input, form select { width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; font-size:15px; box-sizing:border-box; margin-top:6px; }
+  form .row2 { display:flex; gap:8px; margin-top:10px; }
+  form .row2 select { width:auto; flex:1 }
+  form button { flex:2; padding:12px; background:#059669; color:#fff; border:0; border-radius:10px; font-weight:600 }
+  ul { list-style:none; padding:0; margin:12px 0; display:flex; flex-direction:column; gap:8px }
+  .job { background:#fff; border-radius:12px; padding:12px; cursor:pointer }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px }
+  .meta { color:#64748b; font-size:12px; word-break:break-all }
+  .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#e2e8f0 }
+  .st-done { background:#d1fae5; color:#065f46 } .st-failed { background:#fee2e2; color:#991b1b }
+  .st-downloading { background:#dbeafe; color:#1e40af } .st-generating { background:#ede9fe; color:#5b21b6 }
+  .bar { height:6px; background:#e2e8f0; border-radius:999px; margin-top:6px; overflow:hidden }
+  .bar > div { height:100%; background:#0f172a; transition:width .3s }
+  dialog { border:0; border-radius:16px; padding:16px; max-width:min(640px, 92vw); width:100% }
+  #dArtifacts li, #dChapters li { padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:14px }
+  #dArtifacts li { display:flex; justify-content:space-between; gap:8px }
+  button.icon { background:none; border:1px solid #cbd5e1; padding:6px 10px; border-radius:8px; font-size:12px }
+  #status { font-size:12px; color:#64748b; min-height:1em }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🎬 yt-dlp (HTML)</h1>
+    <button id="cfgBtn" class="icon">⚙️ 서버 설정</button>
+  </header>
+
+  <form id="form">
+    <label>YouTube URL</label>
+    <input id="url" type="url" required placeholder="https://www.youtube.com/watch?v=..." />
+    <div class="row2">
+      <select id="quality">
+        <option value="flash">Flash (기본/빠름)</option>
+        <option value="pro">Pro (고품질)</option>
+      </select>
+      <button type="submit">시작</button>
+    </div>
+    <div id="status"></div>
+  </form>
+
+  <ul id="jobs"></ul>
+</div>
+
+<dialog id="detail">
+  <div class="row"><strong id="dTitle"></strong><button id="dClose" class="icon">닫기</button></div>
+  <div id="dMeta" class="meta" style="margin:8px 0"></div>
+  <h3 style="font-size:14px">📚 시계열 목차</h3>
+  <ul id="dChapters"></ul>
+  <h3 style="font-size:14px">📦 산출물</h3>
+  <ul id="dArtifacts"></ul>
+</dialog>
+</body>
+</html>

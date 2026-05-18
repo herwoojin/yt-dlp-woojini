@@ -1,0 +1,22 @@
+# env
+.env
+.env.local
+firebase-admin.json
+runtime_settings.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# node
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/*.tsbuildinfo
+frontend/src/**/*.js
+
+# misc
+.DS_Store
