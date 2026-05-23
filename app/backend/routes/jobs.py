@@ -1,7 +1,7 @@
 """Job routes: list, create, fetch detail."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
 from ..auth import UserDep
 from ..jobs import registry
@@ -16,12 +16,19 @@ async def list_jobs(user=UserDep) -> list[JobInfo]:
 
 
 @router.post("", response_model=JobInfo, status_code=201)
-async def create_job(payload: JobCreateRequest, user=UserDep) -> JobInfo:
+async def create_job(
+    payload: JobCreateRequest,
+    user=UserDep,
+    x_gemini_key: str | None = Header(default=None),
+) -> JobInfo:
+    # 헤더 우선, 없으면 body의 gemini_api_key 사용
+    api_key = x_gemini_key or payload.gemini_api_key
     job = await registry.submit(
         url=str(payload.url),
         quality=payload.quality,
         video_format=payload.video_format,
         owner_uid=user["uid"],
+        gemini_api_key=api_key,
     )
     return job
 

@@ -23,7 +23,8 @@ log = logging.getLogger(__name__)
 class JobRegistry:
     def __init__(self) -> None:
         self._jobs: dict[str, JobInfo] = {}
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+        self._api_keys: dict[str, str] = {}  # job_id -> gemini api key (메모리 only)
         self._lock = asyncio.Lock()
         self._worker_task: asyncio.Task | None = None
         self._load_from_disk()
@@ -51,7 +52,14 @@ class JobRegistry:
     def get(self, job_id: str) -> JobInfo | None:
         return self._jobs.get(job_id)
 
-    async def submit(self, url: str, quality: GeminiQuality, video_format: str, owner_uid: str) -> JobInfo:
+    async def submit(
+        self,
+        url: str,
+        quality: GeminiQuality,
+        video_format: str,
+        owner_uid: str,
+        gemini_api_key: str | None = None,
+    ) -> JobInfo:
         job_id = uuid.uuid4().hex[:12]
         now = datetime.utcnow()
         job = JobInfo(
@@ -65,8 +73,10 @@ class JobRegistry:
             owner_uid=owner_uid,
         )
         self._jobs[job_id] = job
+        if gemini_api_key:
+            self._api_keys[job_id] = gemini_api_key
         await self._persist(job)
-        await self._queue.put(job_id)
+        await self._queue.put((job_id, gemini_api_key))
         return job
 
     async def _persist(self, job: JobInfo) -> None:
@@ -90,16 +100,17 @@ class JobRegistry:
 
     async def _worker_loop(self) -> None:
         while True:
-            job_id = await self._queue.get()
+            job_id, gemini_api_key = await self._queue.get()
             try:
-                await self._run_job(job_id)
+                await self._run_job(job_id, gemini_api_key=gemini_api_key)
             except Exception:
                 log.exception("worker failed for job %s", job_id)
                 await self._update(job_id, status=JobStatus.FAILED, error=traceback.format_exc())
             finally:
+                self._api_keys.pop(job_id, None)  # 사용 후 메모리에서 삭제
                 self._queue.task_done()
 
-    async def _run_job(self, job_id: str) -> None:
+    async def _run_job(self, job_id: str, gemini_api_key: str | None = None) -> None:
         job = self._jobs[job_id]
         jdir = storage.job_dir(job_id)
 
@@ -162,6 +173,7 @@ class JobRegistry:
                 jdir,
                 info.get("title") or "",
                 job.quality,
+                api_key=gemini_api_key,
             )
         except Exception as exc:
             log.warning("gemini step failed (non-fatal): %s", exc)

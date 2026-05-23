@@ -3,17 +3,19 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>yt-dlp web (HTML)</title>
+<title>yt-dlp web</title>
 <script type="module">
-  // 동일한 백엔드 API를 호출하는 단일 파일 HTML 대안.
-  // Firebase 없이 ALLOW_INSECURE_AUTH=true 환경에서 동작.
-  // 설정은 화면 우측 상단 ⚙️에서 변경.
+  // yt-dlp webapp 프론트엔드 (단일 HTML)
+  // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
 
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   const BASE = cfg.base || ''
+  const GEMINI_KEY = cfg.gemini_key || ''
 
   async function api(path, init = {}) {
-    const r = await fetch(BASE + path, { headers: { 'Content-Type': 'application/json' }, ...init })
+    const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
+    if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    const r = await fetch(BASE + path, { ...init, headers })
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
     return r.json()
   }
@@ -22,11 +24,39 @@
   const list = $('#jobs')
   const status = $('#status')
 
+  // ─── 설정 모달 ────────────────────────────────────
+  const settingsModal = $('#settingsModal')
   $('#cfgBtn').onclick = () => {
-    const v = prompt('백엔드 API URL', BASE)
-    if (v) { localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: v })); location.reload() }
+    $('#cfgBase').value = BASE
+    $('#cfgGeminiKey').value = GEMINI_KEY
+    settingsModal.showModal()
+  }
+  $('#cfgClose').onclick = () => settingsModal.close()
+  $('#cfgSave').onclick = () => {
+    const newCfg = {
+      base: $('#cfgBase').value.trim().replace(/\/$/, ''),
+      gemini_key: $('#cfgGeminiKey').value.trim(),
+    }
+    localStorage.setItem('ytdlp_cfg', JSON.stringify(newCfg))
+    settingsModal.close()
+    location.reload()
+  }
+  $('#toggleKey').onclick = () => {
+    const inp = $('#cfgGeminiKey')
+    inp.type = inp.type === 'password' ? 'text' : 'password'
+    $('#toggleKey').textContent = inp.type === 'password' ? '👁' : '🙈'
   }
 
+  // ─── API 키 경고 배너 ─────────────────────────────
+  if (!GEMINI_KEY && !BASE.includes('localhost') && !BASE.includes('127.0.0.1') && BASE !== '') {
+    $('#keyWarning').style.display = 'block'
+  }
+  $('#keyWarningBtn').onclick = () => {
+    settingsModal.showModal()
+    $('#cfgGeminiKey').focus()
+  }
+
+  // ─── 작업 등록 ────────────────────────────────────
   $('#form').onsubmit = async (e) => {
     e.preventDefault()
     const url = $('#url').value.trim()
@@ -34,9 +64,11 @@
     if (!url) return
     status.textContent = '등록 중...'
     try {
-      await api('/api/jobs', { method: 'POST', body: JSON.stringify({ url, quality }) })
+      const body = { url, quality }
+      if (GEMINI_KEY) body.gemini_api_key = GEMINI_KEY
+      await api('/api/jobs', { method: 'POST', body: JSON.stringify(body) })
       $('#url').value = ''
-      status.textContent = '등록됨'
+      status.textContent = '등록됨 ✅'
       await refresh()
     } catch (err) {
       status.textContent = '실패: ' + err.message
@@ -53,7 +85,11 @@
         el.onclick = () => openDetail(el.dataset.id)
       })
     } catch (err) {
-      status.textContent = '연결 실패: ' + err.message
+      if (BASE === '') {
+        status.textContent = '⚠️ 서버 설정 필요 — ⚙️ 버튼을 눌러 백엔드 URL을 입력하세요'
+      } else {
+        status.textContent = '연결 실패: ' + err.message
+      }
     }
   }
 
@@ -95,6 +131,7 @@
 </script>
 <style>
   :root { color-scheme: light; }
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; margin:0; padding:16px; }
   .wrap { max-width: 640px; margin: 0 auto; }
   header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
@@ -103,29 +140,61 @@
   form input, form select { width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; font-size:15px; box-sizing:border-box; margin-top:6px; }
   form .row2 { display:flex; gap:8px; margin-top:10px; }
   form .row2 select { width:auto; flex:1 }
-  form button { flex:2; padding:12px; background:#059669; color:#fff; border:0; border-radius:10px; font-weight:600 }
+  form button { flex:2; padding:12px; background:#059669; color:#fff; border:0; border-radius:10px; font-weight:600; cursor:pointer }
+  form button:hover { background:#047857 }
   ul { list-style:none; padding:0; margin:12px 0; display:flex; flex-direction:column; gap:8px }
-  .job { background:#fff; border-radius:12px; padding:12px; cursor:pointer }
+  .job { background:#fff; border-radius:12px; padding:12px; cursor:pointer; transition:box-shadow .2s }
+  .job:hover { box-shadow:0 2px 8px rgba(0,0,0,.08) }
   .row { display:flex; justify-content:space-between; align-items:center; gap:8px }
   .meta { color:#64748b; font-size:12px; word-break:break-all }
   .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#e2e8f0 }
   .st-done { background:#d1fae5; color:#065f46 } .st-failed { background:#fee2e2; color:#991b1b }
   .st-downloading { background:#dbeafe; color:#1e40af } .st-generating { background:#ede9fe; color:#5b21b6 }
+  .st-pending { background:#fef3c7; color:#92400e } .st-transcribing { background:#e0e7ff; color:#3730a3 }
   .bar { height:6px; background:#e2e8f0; border-radius:999px; margin-top:6px; overflow:hidden }
   .bar > div { height:100%; background:#0f172a; transition:width .3s }
-  dialog { border:0; border-radius:16px; padding:16px; max-width:min(640px, 92vw); width:100% }
+  dialog { border:0; border-radius:16px; padding:20px; max-width:min(640px, 92vw); width:100% }
+  dialog::backdrop { background:rgba(0,0,0,.4) }
   #dArtifacts li, #dChapters li { padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:14px }
   #dArtifacts li { display:flex; justify-content:space-between; gap:8px }
-  button.icon { background:none; border:1px solid #cbd5e1; padding:6px 10px; border-radius:8px; font-size:12px }
-  #status { font-size:12px; color:#64748b; min-height:1em }
+  button.icon { background:none; border:1px solid #cbd5e1; padding:6px 10px; border-radius:8px; font-size:12px; cursor:pointer }
+  button.icon:hover { background:#f1f5f9 }
+  #status { font-size:12px; color:#64748b; min-height:1em; margin-top:6px }
+
+  /* 설정 모달 */
+  .settings-form { display:flex; flex-direction:column; gap:14px; margin-top:12px }
+  .settings-form label { font-size:13px; font-weight:600; color:#334155 }
+  .settings-form input { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px }
+  .settings-form .hint { font-size:11px; color:#94a3b8; margin-top:2px }
+  .key-row { display:flex; gap:6px; align-items:center }
+  .key-row input { flex:1 }
+  .key-row button { padding:8px 10px; background:none; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; font-size:14px }
+  .btn-row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px }
+  .btn-primary { padding:10px 20px; background:#059669; color:#fff; border:0; border-radius:8px; font-weight:600; cursor:pointer }
+  .btn-primary:hover { background:#047857 }
+  .btn-secondary { padding:10px 20px; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer }
+
+  /* API 키 경고 배너 */
+  .key-warning { display:none; background:#fef3c7; border:1px solid #fcd34d; border-radius:12px; padding:12px 14px; margin-bottom:12px; font-size:13px; color:#92400e }
+  .key-warning button { background:#f59e0b; color:#fff; border:0; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; margin-left:8px }
+
+  /* 연결 상태 */
+  .conn-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px }
+  .conn-ok { background:#10b981 }
+  .conn-fail { background:#ef4444 }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>🎬 yt-dlp (HTML)</h1>
-    <button id="cfgBtn" class="icon">⚙️ 서버 설정</button>
+    <h1>🎬 yt-dlp webapp</h1>
+    <button id="cfgBtn" class="icon">⚙️ 설정</button>
   </header>
+
+  <div id="keyWarning" class="key-warning">
+    🔑 Gemini API 키가 설정되지 않았습니다. 요약/목차 생성을 위해 키를 입력해 주세요.
+    <button id="keyWarningBtn">키 설정하기</button>
+  </div>
 
   <form id="form">
     <label>YouTube URL</label>
@@ -143,6 +212,7 @@
   <ul id="jobs"></ul>
 </div>
 
+<!-- 작업 상세 모달 -->
 <dialog id="detail">
   <div class="row"><strong id="dTitle"></strong><button id="dClose" class="icon">닫기</button></div>
   <div id="dMeta" class="meta" style="margin:8px 0"></div>
@@ -150,6 +220,36 @@
   <ul id="dChapters"></ul>
   <h3 style="font-size:14px">📦 산출물</h3>
   <ul id="dArtifacts"></ul>
+</dialog>
+
+<!-- 설정 모달 -->
+<dialog id="settingsModal">
+  <div class="row">
+    <strong style="font-size:16px">⚙️ 설정</strong>
+    <button id="cfgClose" class="icon">닫기</button>
+  </div>
+  <div class="settings-form">
+    <div>
+      <label>🌐 백엔드 서버 URL</label>
+      <input id="cfgBase" type="url" placeholder="https://your-tunnel.trycloudflare.com" />
+      <div class="hint">비워두면 현재 페이지와 같은 서버를 사용합니다. Netlify에서는 Cloudflare 터널 URL을 입력하세요.</div>
+    </div>
+    <div>
+      <label>🔑 Gemini API 키</label>
+      <div class="key-row">
+        <input id="cfgGeminiKey" type="password" placeholder="AIza..." />
+        <button id="toggleKey" type="button">👁</button>
+      </div>
+      <div class="hint">
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 발급받을 수 있습니다.
+        키는 이 브라우저에만 저장되며 서버에 저장되지 않습니다.
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn-secondary" onclick="document.getElementById('settingsModal').close()">취소</button>
+      <button id="cfgSave" class="btn-primary" type="button">저장</button>
+    </div>
+  </div>
 </dialog>
 </body>
 </html>

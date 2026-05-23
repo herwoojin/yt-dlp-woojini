@@ -20,11 +20,16 @@ log = logging.getLogger(__name__)
 _client: genai.Client | None = None
 
 
-def _get_client() -> genai.Client:
+def _get_client(api_key: str | None = None) -> genai.Client:
+    """Return a genai Client. If *api_key* is given, create a throwaway
+    client for that key (per-request). Otherwise fall back to the
+    server-wide key from config / .env."""
+    if api_key:
+        return genai.Client(api_key=api_key)
     global _client
     if _client is None:
         if not config.GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY 미설정 - .env 확인")
+            raise RuntimeError("GEMINI_API_KEY 미설정 - .env 확인 또는 프론트엔드에서 API 키를 입력하세요")
         _client = genai.Client(api_key=config.GEMINI_API_KEY)
     return _client
 
@@ -33,8 +38,8 @@ def _model(quality: str) -> str:
     return config.PRO_GEMINI_MODEL if quality == "pro" else config.DEFAULT_GEMINI_MODEL
 
 
-def _call(prompt: str, quality: str) -> str:
-    client = _get_client()
+def _call(prompt: str, quality: str, api_key: str | None = None) -> str:
+    client = _get_client(api_key)
     resp = client.models.generate_content(model=_model(quality), contents=prompt)
     return (resp.text or "").strip()
 
@@ -64,7 +69,7 @@ def _extract_json(text: str) -> Any:
         raise
 
 
-def generate_chapters(timed_transcript: str, title: str, quality: str) -> list[dict]:
+def generate_chapters(timed_transcript: str, title: str, quality: str, api_key: str | None = None) -> list[dict]:
     prompt = f"""다음은 유튜브 영상 "{title}"의 시간 인덱스 자막입니다.
 영상의 흐름과 문맥을 이해해서 시계열 순으로 주요 섹션 목차를 만들어주세요.
 
@@ -78,7 +83,7 @@ def generate_chapters(timed_transcript: str, title: str, quality: str) -> list[d
 자막:
 {_read_timed(timed_transcript)}
 """
-    raw = _call(prompt, quality)
+    raw = _call(prompt, quality, api_key=api_key)
     try:
         data = _extract_json(raw)
         if isinstance(data, list):
@@ -88,7 +93,7 @@ def generate_chapters(timed_transcript: str, title: str, quality: str) -> list[d
     return [{"time": "00:00:00", "title": title or "전체 영상", "summary": raw[:200]}]
 
 
-def generate_short_summary_html(plain_text: str, title: str, quality: str) -> str:
+def generate_short_summary_html(plain_text: str, title: str, quality: str, api_key: str | None = None) -> str:
     prompt = f"""아래 유튜브 영상 "{title}"의 자막을 읽고 한국어로 짧고 명확하게 요약해주세요.
 
 요구사항:
@@ -100,10 +105,10 @@ def generate_short_summary_html(plain_text: str, title: str, quality: str) -> st
 자막:
 {_read_timed(plain_text, max_chars=40_000)}
 """
-    return _strip_fence(_call(prompt, quality))
+    return _strip_fence(_call(prompt, quality, api_key=api_key))
 
 
-def generate_email_html(plain_text: str, title: str, chapters: list[dict], quality: str) -> str:
+def generate_email_html(plain_text: str, title: str, chapters: list[dict], quality: str, api_key: str | None = None) -> str:
     chapters_md = "\n".join(f"- [{c.get('time','')}] {c.get('title','')}" for c in chapters)
     prompt = f"""아래 유튜브 영상 "{title}"을 이메일 본문에 붙여넣기 좋은 HTML로 만들어주세요.
 
@@ -121,10 +126,10 @@ def generate_email_html(plain_text: str, title: str, chapters: list[dict], quali
 자막 발췌:
 {_read_timed(plain_text, max_chars=30_000)}
 """
-    return _strip_fence(_call(prompt, quality))
+    return _strip_fence(_call(prompt, quality, api_key=api_key))
 
 
-def generate_blog_html(plain_text: str, title: str, chapters: list[dict], quality: str) -> str:
+def generate_blog_html(plain_text: str, title: str, chapters: list[dict], quality: str, api_key: str | None = None) -> str:
     chapters_md = "\n".join(f"- [{c.get('time','')}] {c.get('title','')} — {c.get('summary','')}" for c in chapters)
     prompt = f"""아래 유튜브 영상 "{title}"을 블로그/카페에 올릴 한국어 장문 글로 작성해주세요.
 
@@ -142,7 +147,7 @@ def generate_blog_html(plain_text: str, title: str, chapters: list[dict], qualit
 자막 발췌:
 {_read_timed(plain_text, max_chars=50_000)}
 """
-    return _strip_fence(_call(prompt, quality))
+    return _strip_fence(_call(prompt, quality, api_key=api_key))
 
 
 def _strip_fence(text: str) -> str:
@@ -153,17 +158,17 @@ def _strip_fence(text: str) -> str:
     return text.strip()
 
 
-def generate_all(job_dir: Path, title: str, quality: str) -> dict[str, Any]:
+def generate_all(job_dir: Path, title: str, quality: str, api_key: str | None = None) -> dict[str, Any]:
     """Reads plain + timed transcripts from job_dir and produces all four outputs."""
     plain_path = job_dir / "transcript.txt"
     timed_path = job_dir / "transcript_timed.txt"
     plain_text = plain_path.read_text(encoding="utf-8") if plain_path.exists() else ""
     timed_text = timed_path.read_text(encoding="utf-8") if timed_path.exists() else plain_text
 
-    chapters = generate_chapters(timed_text, title, quality)
-    summary_short = generate_short_summary_html(plain_text, title, quality)
-    email_html = generate_email_html(plain_text, title, chapters, quality)
-    blog_html = generate_blog_html(plain_text, title, chapters, quality)
+    chapters = generate_chapters(timed_text, title, quality, api_key=api_key)
+    summary_short = generate_short_summary_html(plain_text, title, quality, api_key=api_key)
+    email_html = generate_email_html(plain_text, title, chapters, quality, api_key=api_key)
+    blog_html = generate_blog_html(plain_text, title, chapters, quality, api_key=api_key)
     return {
         "chapters": chapters,
         "summary_short_html": summary_short,

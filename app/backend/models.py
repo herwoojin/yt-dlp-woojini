@@ -27,6 +27,10 @@ class JobCreateRequest(BaseModel):
         default="best[ext=mp4]/best",
         description="yt-dlp format selector. Default keeps the file local without size cap.",
     )
+    gemini_api_key: str | None = Field(
+        default=None,
+        description="사용자 본인의 Gemini API 키. 전달 시 서버 키 대신 사용.",
+    )
 
 
 class JobArtifact(BaseModel):
