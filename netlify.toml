@@ -1,0 +1,8 @@
+[build]
+  publish = "app/frontend-html"
+
+# SPA 라우팅: 모든 경로를 index.html로
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
