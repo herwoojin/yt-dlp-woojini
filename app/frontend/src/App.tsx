@@ -6,6 +6,7 @@ import { UrlForm } from './components/UrlForm'
 import { JobList } from './components/JobList'
 import { JobDetail } from './components/JobDetail'
 import { SettingsPanel } from './components/SettingsPanel'
+import { HelpPanel } from './components/HelpPanel'
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -13,6 +14,7 @@ export default function App() {
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
     const unsub = watchAuth((u) => { setUser(u); setAuthReady(true) })
@@ -51,6 +53,11 @@ export default function App() {
         </div>
         <div className="flex gap-1.5">
           <button
+            onClick={() => setShowHelp(true)}
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-white border border-slate-200"
+            title="셋업 가이드"
+          >🛟 가이드</button>
+          <button
             onClick={() => setShowSettings(true)}
             className="text-xs px-2.5 py-1.5 rounded-lg bg-white border border-slate-200"
           >⚙️ 설정</button>
@@ -71,6 +78,7 @@ export default function App() {
       )}
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
     </div>
   )
 }

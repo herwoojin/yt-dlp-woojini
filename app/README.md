@@ -92,6 +92,87 @@ npm run dev    # http://localhost:5173
 `app/frontend-html/index.html`를 그대로 브라우저로 열거나, Netlify에 별도 사이트로 올려도 됩니다.
 ALLOW_INSECURE_AUTH=true 일 때만 동작합니다.
 
+## 6. 상시 운영 (언제 어디서든 접근)
+
+맥이 켜져 있는 한 어디서든 접속 가능하도록 launchd로 uvicorn을 부팅 시 자동 시작합니다.
+공개 URL 발급 방식은 둘 중 선택:
+
+| 옵션 | 영구 URL | sudo 필요 | 가입 | 추천 |
+|------|:--:|:--:|------|------|
+| **A. cloudflared quick tunnel** | ❌ 재시작 시 변경 | ❌ | 불필요 | 즉시 동작 (스크립트로 자동) |
+| **B. Tailscale Funnel** | ✅ 고정 `*.ts.net` | ✅ 설치 시 1회 | Tailscale 계정 (Google/GitHub) | Netlify 환경변수 안 바꿔도 됨 |
+
+### 옵션 A — Cloudflared (즉시 동작, sudo 없음)
+
+```bash
+brew install cloudflared              # 1회, sudo 불필요
+bash app/scripts/setup-cloudflared.sh # launchd 등록 + URL 발급
+bash app/scripts/get-url.sh           # 현재 URL 확인 (필요시마다)
+```
+
+이 스크립트가:
+- `~/Library/LaunchAgents/com.user.ytdlp-backend.plist` (uvicorn)
+- `~/Library/LaunchAgents/com.user.ytdlp-tunnel.plist` (cloudflared)
+- 부팅·로그인·크래시 시 자동 재시작 (KeepAlive)
+
+⚠️ **URL이 재시작 시 바뀜.** Netlify의 `VITE_API_BASE_URL`을 그때마다 업데이트해야 합니다.
+이게 번거로우면 옵션 B로 가세요.
+
+### 옵션 B — Tailscale Funnel (영구 URL, 사용자 1회 설정)
+
+### 사용자가 직접 해야 할 1회 단계
+
+```bash
+# 1) Tailscale 설치 (비밀번호 1회 입력)
+brew install --cask tailscale-app
+
+# 2) /Applications/Tailscale.app 실행 → 메뉴바 → "Log in..."
+#    브라우저에서 Tailscale 계정 로그인 (Google/GitHub 가능, 개인 사용 무료)
+
+# 3) Funnel 활성화 (admin 콘솔, 1회)
+#    https://login.tailscale.com/admin/dns      → HTTPS Certificates Enable
+#    https://login.tailscale.com/admin/acls/file → ACL에 아래 추가:
+#      "nodeAttrs": [{"target": ["autogroup:member"], "attr": ["funnel"]}]
+```
+
+### 자동 설정 스크립트
+
+```bash
+bash app/scripts/setup-anywhere.sh
+```
+
+이 스크립트가 자동으로:
+- launchd plist (`~/Library/LaunchAgents/com.user.ytdlp-backend.plist`) 생성
+- 부팅 시 uvicorn 자동 시작 + 크래시 시 자동 재시작
+- Tailscale Funnel을 `--bg`로 영구 활성화 (재부팅 후 자동 복원)
+- 공개 URL 출력 (Netlify의 `VITE_API_BASE_URL`에 넣을 값)
+
+### 상태 확인 / 해제
+
+```bash
+bash app/scripts/status-anywhere.sh    # backend + funnel + 외부 도달 테스트
+bash app/scripts/stop-anywhere.sh      # 자동시작 해제 (데이터는 보존)
+```
+
+### 맥 절전 설정 권장
+
+맥이 sleep으로 빠지면 백엔드가 멈춥니다. 데스크톱이거나 전원 연결 중이면:
+
+```bash
+# 전원 연결 시 절대 sleep 안 함
+sudo pmset -c sleep 0 disksleep 0 displaysleep 30
+
+# 배터리 사용 시는 평소처럼 (옵션)
+sudo pmset -b sleep 10 displaysleep 5
+```
+
+### 한계 및 대안
+
+- **맥을 꺼야 할 때** (출장, 정전 등) → 그 시간 동안은 접속 불가. 더 강한 24/7이 필요하면
+  옵션 C (클라우드 큐 + 맥 워커 하이브리드)로 확장 필요.
+- **Tailscale Free 플랜 제한** — Funnel은 무료, 모든 기기에서 접근 가능.
+- **로그 위치** — `~/Library/Logs/ytdlp-backend.{out,err}.log`
+
 ## 산출물 (각 job 디렉토리)
 
 | 파일                    | 설명 |

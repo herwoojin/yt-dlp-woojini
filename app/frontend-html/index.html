@@ -10,7 +10,7 @@
   // 설정은 화면 우측 상단 ⚙️에서 변경.
 
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
-  const BASE = cfg.base || 'http://localhost:8000'
+  const BASE = cfg.base || ''
 
   async function api(path, init = {}) {
     const r = await fetch(BASE + path, { headers: { 'Content-Type': 'application/json' }, ...init })

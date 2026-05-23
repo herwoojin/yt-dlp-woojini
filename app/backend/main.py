@@ -7,13 +7,19 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .jobs import registry
 from .routes import files, jobs, settings
 from .services import telegram_bot
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend-html"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ytdlp-app")
@@ -49,3 +55,9 @@ app.include_router(files.router)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    index = FRONTEND_DIR / "index.html"
+    return HTMLResponse(index.read_text(encoding="utf-8"))
