@@ -9,15 +9,49 @@
   // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
 
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
-  const BASE = cfg.base || ''
+  let BASE = cfg.base || ''
+  let BASE_SOURCE = 'localStorage'  // 'auto' | 'localStorage'
   const GEMINI_KEY = cfg.gemini_key || ''
+
+  // tunnel.json은 cloudflared 재시작 시 자동 게시되는 현재 백엔드 URL이다.
+  // localStorage에 사용자가 설정한 base가 없으면 자동으로 발견된 URL을 사용한다.
+  async function discoverTunnelUrl() {
+    try {
+      const r = await fetch('/tunnel.json', { cache: 'no-store' })
+      if (!r.ok) return null
+      const j = await r.json()
+      return (j && j.base) ? String(j.base).replace(/\/$/, '') : null
+    } catch (_) { return null }
+  }
+
+  async function ensureBase() {
+    // 사용자가 명시적으로 설정한 base가 있으면 그것을 우선
+    if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return }
+    const auto = await discoverTunnelUrl()
+    if (auto) { BASE = auto; BASE_SOURCE = 'auto' }
+  }
 
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
-    const r = await fetch(BASE + path, { ...init, headers })
-    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
-    return r.json()
+    try {
+      const r = await fetch(BASE + path, { ...init, headers })
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+      return r.json()
+    } catch (err) {
+      // 네트워크 오류면 tunnel URL이 바뀐 것일 수 있으므로 재발견 후 1회 재시도
+      if (BASE_SOURCE === 'auto' || !cfg.base) {
+        const fresh = await discoverTunnelUrl()
+        if (fresh && fresh !== BASE) {
+          BASE = fresh
+          BASE_SOURCE = 'auto'
+          const r2 = await fetch(BASE + path, { ...init, headers })
+          if (!r2.ok) throw new Error(`${r2.status} ${await r2.text()}`)
+          return r2.json()
+        }
+      }
+      throw err
+    }
   }
 
   const $ = (sel) => document.querySelector(sel)
@@ -48,8 +82,10 @@
   }
 
   // ─── API 키 경고 배너 ─────────────────────────────
-  if (!GEMINI_KEY && !BASE.includes('localhost') && !BASE.includes('127.0.0.1') && BASE !== '') {
-    $('#keyWarning').style.display = 'block'
+  function maybeShowKeyWarning() {
+    if (!GEMINI_KEY && BASE && !BASE.includes('localhost') && !BASE.includes('127.0.0.1')) {
+      $('#keyWarning').style.display = 'block'
+    }
   }
   $('#keyWarningBtn').onclick = () => {
     settingsModal.showModal()
@@ -133,8 +169,11 @@
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
-  refresh()
-  setInterval(refresh, 3000)
+  ensureBase().then(() => {
+    maybeShowKeyWarning()
+    refresh()
+    setInterval(refresh, 3000)
+  })
 </script>
 <style>
   :root { color-scheme: light; }
