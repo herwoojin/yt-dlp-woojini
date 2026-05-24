@@ -14,21 +14,73 @@
   const GEMINI_KEY = cfg.gemini_key || ''
 
   // tunnel.json은 cloudflared 재시작 시 자동 게시되는 현재 백엔드 URL이다.
-  // localStorage에 사용자가 설정한 base가 없으면 자동으로 발견된 URL을 사용한다.
-  async function discoverTunnelUrl() {
+  // - Netlify (/tunnel.json)는 최신 deploy의 정적 파일 → 리빌드 완료 후에만 최신값
+  // - GitHub raw는 push 즉시 반영 → "정답" 역할
+  // 두 값이 다르면 Netlify가 리빌드 중이라고 판단하고 진행 배너를 표시한다.
+  const GITHUB_RAW_TUNNEL = 'https://raw.githubusercontent.com/herwoojin/yt-dlp-woojini/master/app/frontend-html/tunnel.json'
+
+  async function fetchTunnelJson(url) {
     try {
-      const r = await fetch('/tunnel.json', { cache: 'no-store' })
+      const r = await fetch(url, { cache: 'no-store' })
       if (!r.ok) return null
       const j = await r.json()
-      return (j && j.base) ? String(j.base).replace(/\/$/, '') : null
+      if (!j || !j.base) return null
+      return { base: String(j.base).replace(/\/$/, ''), updated: j.updated || null }
     } catch (_) { return null }
+  }
+
+  async function checkRebuildState() {
+    const [netlify, github] = await Promise.all([
+      fetchTunnelJson('/tunnel.json'),
+      fetchTunnelJson(GITHUB_RAW_TUNNEL),
+    ])
+    if (!github && !netlify) return null
+    const truth = github || netlify
+    const rebuilding = !!(github && (!netlify || netlify.base !== github.base))
+    return { rebuilding, canonical: truth, netlify, github }
+  }
+
+  async function discoverTunnelUrl() {
+    const s = await checkRebuildState()
+    return s ? s.canonical.base : null
   }
 
   async function ensureBase() {
     // 사용자가 명시적으로 설정한 base가 있으면 그것을 우선
     if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return }
-    const auto = await discoverTunnelUrl()
-    if (auto) { BASE = auto; BASE_SOURCE = 'auto' }
+    const s = await checkRebuildState()
+    if (s) {
+      BASE = s.canonical.base
+      BASE_SOURCE = 'auto'
+      if (s.rebuilding) startRebuildBanner(s)
+    }
+  }
+
+  // ─── 리빌드 진행 배너 ───────────────────────────────
+  let rebuildPoll = null
+  function startRebuildBanner(state) {
+    const banner = $('#rebuildBanner')
+    const reloadBtn = $('#rebuildBannerReload')
+    const text = $('#rebuildBannerText')
+    const startedAt = state.github && state.github.updated
+      ? new Date(state.github.updated).getTime()
+      : Date.now()
+    banner.hidden = false
+
+    const tick = async () => {
+      const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000))
+      const fresh = await checkRebuildState()
+      if (fresh && !fresh.rebuilding) {
+        clearInterval(rebuildPoll); rebuildPoll = null
+        text.textContent = `✅ 백엔드 URL 업데이트가 Netlify에 반영되었습니다 (${elapsed}초 소요).`
+        reloadBtn.hidden = false
+        return
+      }
+      const url = (fresh && fresh.canonical && fresh.canonical.base) || state.canonical.base
+      text.textContent = `🔄 새 백엔드 URL 감지 → Netlify 리빌드 진행 중 (${elapsed}초 경과)\n   → ${url}`
+    }
+    tick()
+    rebuildPoll = setInterval(tick, 5000)
   }
 
   async function api(path, init = {}) {
@@ -224,6 +276,12 @@
   .key-warning { display:none; background:#fef3c7; border:1px solid #fcd34d; border-radius:12px; padding:12px 14px; margin-bottom:12px; font-size:13px; color:#92400e }
   .key-warning button { background:#f59e0b; color:#fff; border:0; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; margin-left:8px }
 
+  /* Netlify 리빌드 진행 배너 */
+  .rebuild-banner { display:flex; align-items:center; gap:8px; background:#e0f2fe; border:1px solid #7dd3fc; border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#075985; white-space:pre-line }
+  .rebuild-banner[hidden] { display:none }
+  .rebuild-banner button { margin-left:auto; padding:6px 12px; background:#0284c7; color:#fff; border:0; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; flex-shrink:0 }
+  .rebuild-banner button:hover { background:#0369a1 }
+
   /* 연결 상태 */
   .conn-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px }
   .conn-ok { background:#10b981 }
@@ -236,6 +294,11 @@
     <h1>🎬 yt-dlp webapp</h1>
     <button id="cfgBtn" class="icon">⚙️ 설정</button>
   </header>
+
+  <div id="rebuildBanner" class="rebuild-banner" hidden>
+    <span id="rebuildBannerText">🔄 업데이트 확인 중...</span>
+    <button id="rebuildBannerReload" hidden onclick="location.reload()">새로고침</button>
+  </div>
 
   <div id="keyWarning" class="key-warning">
     🔑 Gemini API 키가 설정되지 않았습니다. 요약/목차 생성을 위해 키를 입력해 주세요.
