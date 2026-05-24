@@ -73,8 +73,14 @@ ALLOWED_ORIGINS = [
         "ALLOWED_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:8000,http://127.0.0.1:8000,"
-        "https://25y.netlify.app,"
-        "https://neil-clone-blah-bin.trycloudflare.com",
+        "https://25y.netlify.app",
     ).split(",")
     if o.strip()
 ]
+
+# Allow any Netlify deploy (including PR previews) and any Cloudflare quick tunnel,
+# so changing the tunnel URL or the Netlify site name doesn't break CORS.
+ALLOWED_ORIGIN_REGEX = os.getenv(
+    "ALLOWED_ORIGIN_REGEX",
+    r"https://([a-z0-9-]+\.)*(netlify\.app|trycloudflare\.com)",
+)

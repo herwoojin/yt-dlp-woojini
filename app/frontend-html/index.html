@@ -120,6 +120,13 @@
         <span>${escape(a.kind)} — ${escape(a.filename)}</span>
         <a href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>다운로드</a>
       </li>`).join('')
+    const zipBtn = $('#dDownloadAll')
+    if (j.artifacts.length > 0) {
+      zipBtn.href = `${BASE}/api/files/${j.id}/_archive.zip`
+      zipBtn.style.display = ''
+    } else {
+      zipBtn.style.display = 'none'
+    }
     dlg.showModal()
   }
   $('#dClose').onclick = () => $('#detail').close()
@@ -218,7 +225,10 @@
   <div id="dMeta" class="meta" style="margin:8px 0"></div>
   <h3 style="font-size:14px">📚 시계열 목차</h3>
   <ul id="dChapters"></ul>
-  <h3 style="font-size:14px">📦 산출물</h3>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+    <h3 style="font-size:14px;margin:0">📦 산출물</h3>
+    <a id="dDownloadAll" class="btn-primary" style="padding:6px 12px;font-size:12px;text-decoration:none;display:none" download>📦 전체 ZIP 다운로드</a>
+  </div>
   <ul id="dArtifacts"></ul>
 </dialog>
 

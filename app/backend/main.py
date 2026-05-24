@@ -42,7 +42,8 @@ app = FastAPI(title="yt-dlp web app", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
