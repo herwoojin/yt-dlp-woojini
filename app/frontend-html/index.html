@@ -91,16 +91,15 @@
       if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
       return r.json()
     } catch (err) {
-      // 네트워크 오류면 tunnel URL이 바뀐 것일 수 있으므로 재발견 후 1회 재시도
-      if (BASE_SOURCE === 'auto' || !cfg.base) {
-        const fresh = await discoverTunnelUrl()
-        if (fresh && fresh !== BASE) {
-          BASE = fresh
-          BASE_SOURCE = 'auto'
-          const r2 = await fetch(BASE + path, { ...init, headers })
-          if (!r2.ok) throw new Error(`${r2.status} ${await r2.text()}`)
-          return r2.json()
-        }
+      // 어떤 source든 실패하면 tunnel.json/GitHub raw에서 다시 발견 후 1회 재시도
+      // (localStorage에 옛 URL이 박혀 있어도 자동 복구 가능하도록)
+      const fresh = await discoverTunnelUrl()
+      if (fresh && fresh !== BASE) {
+        BASE = fresh
+        BASE_SOURCE = 'auto'
+        const r2 = await fetch(BASE + path, { ...init, headers })
+        if (!r2.ok) throw new Error(`${r2.status} ${await r2.text()}`)
+        return r2.json()
       }
       throw err
     }
@@ -163,9 +162,78 @@
     }
   }
 
+  // ─── 연결 상태 ────────────────────────────────────
+  let connState = { everConnected: false, failStreak: 0, lastError: null }
+
+  function setConnStatus(kind, html) {
+    // kind: 'connecting' | 'failed' | 'ok' | 'no-base'
+    const banner = $('#connStatus')
+    if (kind === 'ok') { banner.hidden = true; banner.className = 'conn-status'; return }
+    banner.hidden = false
+    banner.className = 'conn-status conn-' + kind
+    $('#connStatusText').innerHTML = html
+    $('#connRetryBtn').hidden = (kind === 'connecting')
+  }
+
+  function showConnecting() {
+    const where = BASE ? BASE.replace(/^https?:\/\//, '') : '터널 URL 발견 중'
+    setConnStatus('connecting', `🔄 백엔드에 연결 중… <span style="opacity:.7">(${escape(where)})</span>`)
+    if (!connState.everConnected) {
+      list.innerHTML = '<li style="color:#94a3b8;text-align:center;padding:32px">🔄 백엔드에 연결 중…</li>'
+    }
+  }
+
+  function onConnected() {
+    connState.everConnected = true
+    connState.failStreak = 0
+    connState.lastError = null
+    setConnStatus('ok')
+  }
+
+  function onConnectionFailed(err) {
+    connState.failStreak++
+    connState.lastError = err && err.message ? err.message : String(err)
+    if (!BASE) {
+      setConnStatus('no-base', '⚠️ 백엔드 URL이 설정되지 않았습니다. <strong>⚙️ 설정</strong> 버튼을 눌러 입력하세요.')
+      if (!connState.everConnected) {
+        list.innerHTML = '<li style="color:#94a3b8;text-align:center;padding:32px">⚠️ 백엔드 URL 미설정</li>'
+      }
+      return
+    }
+    const short = connState.lastError.slice(0, 100)
+    if (!connState.everConnected) {
+      // 한 번도 연결된 적 없음 → 큰 실패 상태
+      setConnStatus('failed',
+        `❌ 백엔드에 연결할 수 없습니다 <span style="opacity:.7">(${connState.failStreak}회 시도)</span><br>` +
+        `<span style="font-size:11px;opacity:.7">${escape(BASE)} — ${escape(short)}</span>`)
+      list.innerHTML = `<li style="color:#94a3b8;text-align:center;padding:32px">
+        ❌ 백엔드에 연결할 수 없습니다 (${connState.failStreak}회 시도)
+        <div style="font-size:11px;margin-top:8px">맥북에서 cloudflared/uvicorn이 실행 중인지 확인하세요</div>
+      </li>`
+    } else {
+      // 이전엔 연결됐었음 → 작은 배너만, 작업 목록 유지
+      setConnStatus('failed',
+        `⚠️ 연결 일시 끊김 <span style="opacity:.7">(${connState.failStreak}회 재시도 중)</span>`)
+    }
+  }
+
+  async function forceReconnect() {
+    setConnStatus('connecting', '🔄 새 URL 확인 중…')
+    // localStorage override 무시하고 GitHub raw에서 강제 재발견
+    const s = await checkRebuildState()
+    if (s && s.canonical) {
+      BASE = s.canonical.base
+      BASE_SOURCE = 'auto'
+      if (s.rebuilding) startRebuildBanner(s)
+    }
+    refresh()
+  }
+
   async function refresh() {
+    if (!connState.everConnected) showConnecting()
     try {
       const jobs = await api('/api/jobs')
+      onConnected()
       list.innerHTML = jobs.length === 0
         ? '<li style="color:#888;text-align:center;padding:24px">작업이 없습니다.</li>'
         : jobs.map(renderJob).join('')
@@ -173,11 +241,7 @@
         el.onclick = () => openDetail(el.dataset.id)
       })
     } catch (err) {
-      if (BASE === '') {
-        status.textContent = '⚠️ 서버 설정 필요 — ⚙️ 버튼을 눌러 백엔드 URL을 입력하세요'
-      } else {
-        status.textContent = '연결 실패: ' + err.message
-      }
+      onConnectionFailed(err)
     }
   }
 
@@ -221,6 +285,9 @@
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
+  // 즉시 "연결 중" 표시 후 백엔드 URL 발견 → 첫 refresh
+  showConnecting()
+  $('#connRetryBtn').onclick = forceReconnect
   ensureBase().then(() => {
     maybeShowKeyWarning()
     refresh()
@@ -282,6 +349,18 @@
   .rebuild-banner button { margin-left:auto; padding:6px 12px; background:#0284c7; color:#fff; border:0; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; flex-shrink:0 }
   .rebuild-banner button:hover { background:#0369a1 }
 
+  /* 연결 상태 배너 */
+  .conn-status { display:flex; align-items:center; gap:8px; border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:13px; line-height:1.45 }
+  .conn-status[hidden] { display:none }
+  .conn-status button { margin-left:auto; padding:6px 12px; border:0; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; flex-shrink:0 }
+  .conn-connecting { background:#f1f5f9; border:1px solid #cbd5e1; color:#475569 }
+  .conn-connecting button { background:#64748b; color:#fff }
+  .conn-failed { background:#fee2e2; border:1px solid #fca5a5; color:#991b1b }
+  .conn-failed button { background:#dc2626; color:#fff }
+  .conn-failed button:hover { background:#b91c1c }
+  .conn-no-base { background:#fef3c7; border:1px solid #fcd34d; color:#92400e }
+  .conn-no-base button { background:#f59e0b; color:#fff }
+
   /* 연결 상태 */
   .conn-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px }
   .conn-ok { background:#10b981 }
@@ -298,6 +377,11 @@
   <div id="rebuildBanner" class="rebuild-banner" hidden>
     <span id="rebuildBannerText">🔄 업데이트 확인 중...</span>
     <button id="rebuildBannerReload" hidden onclick="location.reload()">새로고침</button>
+  </div>
+
+  <div id="connStatus" class="conn-status" hidden>
+    <span id="connStatusText"></span>
+    <button id="connRetryBtn" hidden type="button">다시 시도</button>
   </div>
 
   <div id="keyWarning" class="key-warning">
