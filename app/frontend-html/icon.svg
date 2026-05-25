@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#059669"/>
+  <g transform="translate(96 128)">
+    <rect width="320" height="220" rx="32" fill="#fff"/>
+    <polygon points="130,55 130,175 230,115" fill="#059669"/>
+  </g>
+  <text x="256" y="450" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="64" font-weight="700" text-anchor="middle" fill="#fff">yt-dlp</text>
+</svg>

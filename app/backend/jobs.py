@@ -20,6 +20,36 @@ from .services import downloader, gemini, storage, transcript
 log = logging.getLogger(__name__)
 
 
+def _wrap_html(title: str, body_fragment: str) -> str:
+    """Gemini는 HTML 조각만 반환하므로, charset/스타일이 포함된 완전한 HTML5
+    문서로 감싸 디스크에 저장한다. 그러지 않으면 다운로드해서 브라우저로 열 때
+    한글이 인코딩 불일치로 깨져 보임."""
+    safe_title = (title or "yt-dlp").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        "<!doctype html>\n"
+        '<html lang="ko">\n'
+        "<head>\n"
+        '  <meta charset="utf-8" />\n'
+        '  <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+        f"  <title>{safe_title}</title>\n"
+        "  <style>\n"
+        "    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; "
+        "max-width: 760px; margin: 24px auto; padding: 0 16px; line-height: 1.65; color: #1f2937; }\n"
+        "    h1, h2, h3 { line-height: 1.3 }\n"
+        "    a { color: #0369a1 }\n"
+        "    code, pre { background: #f1f5f9; border-radius: 4px; padding: 2px 6px; font-size: 0.95em }\n"
+        "    pre { padding: 12px; overflow-x: auto }\n"
+        "    blockquote { border-left: 4px solid #cbd5e1; margin: 0; padding: 6px 14px; color: #475569 }\n"
+        "    img { max-width: 100% }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        f"{body_fragment}\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
 class JobRegistry:
     def __init__(self) -> None:
         self._jobs: dict[str, JobInfo] = {}
@@ -186,11 +216,12 @@ class JobRegistry:
             )
             return
 
+        video_title = info.get("title") or "yt-dlp 산출물"
         for fname, content in [
             ("chapters.json", json.dumps(results["chapters"], ensure_ascii=False, indent=2)),
-            ("summary_short.html", results["summary_short_html"]),
-            ("email_readable.html", results["email_html"]),
-            ("blog_long.html", results["blog_html"]),
+            ("summary_short.html", _wrap_html(video_title + " — 요약", results["summary_short_html"])),
+            ("email_readable.html", _wrap_html(video_title + " — 이메일", results["email_html"])),
+            ("blog_long.html", _wrap_html(video_title + " — 블로그", results["blog_html"])),
         ]:
             p = jdir / fname
             p.write_text(content, encoding="utf-8")

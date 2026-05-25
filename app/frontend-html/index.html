@@ -4,6 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>yt-dlp web</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#059669" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="yt-dlp" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<link rel="apple-touch-icon" href="/icon.svg" />
 <script type="module">
   // yt-dlp webapp 프론트엔드 (단일 HTML)
   // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
@@ -267,11 +274,16 @@
     $('#dMeta').textContent = `${j.status} · ${Math.round(j.progress * 100)}% · Gemini ${j.quality}`
     $('#dChapters').innerHTML = j.chapters.map(c =>
       `<li><code>${c.time}</code> <b>${escape(c.title)}</b>${c.summary ? ' — ' + escape(c.summary) : ''}</li>`).join('')
-    $('#dArtifacts').innerHTML = j.artifacts.map(a => `
-      <li>
-        <span>${escape(a.kind)} — ${escape(a.filename)}</span>
-        <a href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>다운로드</a>
-      </li>`).join('')
+    $('#dArtifacts').innerHTML = j.artifacts.map(a => {
+      const previewable = /\.(html?|json|txt|vtt|srt)$/i.test(a.filename)
+      const previewBtn = previewable
+        ? `<a class="art-action art-preview" href="${BASE}/api/files/${j.id}/preview/${encodeURIComponent(a.filename)}" target="_blank" rel="noopener">👁 바로보기</a>`
+        : ''
+      return `<li>
+        <span class="art-name">${escape(a.kind)} — ${escape(a.filename)}</span>
+        <span class="art-actions">${previewBtn}<a class="art-action" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>⬇ 다운로드</a></span>
+      </li>`
+    }).join('')
     const zipBtn = $('#dDownloadAll')
     if (j.artifacts.length > 0) {
       zipBtn.href = `${BASE}/api/files/${j.id}/_archive.zip`
@@ -284,6 +296,38 @@
   $('#dClose').onclick = () => $('#detail').close()
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+
+  // ─── PWA: service worker + 설치 프롬프트 ─────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  }
+  let pwaInstallEvent = null
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    pwaInstallEvent = e
+    $('#installBtn').hidden = false
+  })
+  window.addEventListener('appinstalled', () => {
+    $('#installBtn').hidden = true
+    pwaInstallEvent = null
+  })
+  $('#installBtn').onclick = async () => {
+    if (!pwaInstallEvent) return
+    pwaInstallEvent.prompt()
+    const { outcome } = await pwaInstallEvent.userChoice
+    if (outcome === 'accepted') $('#installBtn').hidden = true
+    pwaInstallEvent = null
+  }
+  // iOS Safari는 beforeinstallprompt 미지원 → 안내 배너로 fallback
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone
+  if (isIOS && !isStandalone && !localStorage.getItem('ytdlp_ios_install_dismissed')) {
+    $('#iosInstall').hidden = false
+    $('#iosInstallDismiss').onclick = () => {
+      $('#iosInstall').hidden = true
+      localStorage.setItem('ytdlp_ios_install_dismissed', '1')
+    }
+  }
 
   // 즉시 "연결 중" 표시 후 백엔드 URL 발견 → 첫 refresh
   showConnecting()
@@ -321,7 +365,13 @@
   dialog { border:0; border-radius:16px; padding:20px; max-width:min(640px, 92vw); width:100% }
   dialog::backdrop { background:rgba(0,0,0,.4) }
   #dArtifacts li, #dChapters li { padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:14px }
-  #dArtifacts li { display:flex; justify-content:space-between; gap:8px }
+  #dArtifacts li { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap }
+  #dArtifacts .art-name { flex:1; min-width:0; word-break:break-all }
+  #dArtifacts .art-actions { display:flex; gap:6px; flex-shrink:0 }
+  #dArtifacts .art-action { padding:4px 10px; border-radius:6px; font-size:12px; text-decoration:none; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; white-space:nowrap }
+  #dArtifacts .art-action:hover { background:#e2e8f0 }
+  #dArtifacts .art-preview { background:#dbeafe; color:#1e40af; border-color:#93c5fd }
+  #dArtifacts .art-preview:hover { background:#bfdbfe }
   button.icon { background:none; border:1px solid #cbd5e1; padding:6px 10px; border-radius:8px; font-size:12px; cursor:pointer }
   button.icon:hover { background:#f1f5f9 }
   #status { font-size:12px; color:#64748b; min-height:1em; margin-top:6px }
@@ -342,6 +392,11 @@
   /* API 키 경고 배너 */
   .key-warning { display:none; background:#fef3c7; border:1px solid #fcd34d; border-radius:12px; padding:12px 14px; margin-bottom:12px; font-size:13px; color:#92400e }
   .key-warning button { background:#f59e0b; color:#fff; border:0; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; margin-left:8px }
+
+  /* iOS 설치 안내 */
+  .ios-install { display:flex; align-items:center; gap:8px; background:#ecfdf5; border:1px solid #6ee7b7; border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#065f46 }
+  .ios-install[hidden] { display:none }
+  .ios-install button { margin-left:auto; background:transparent; border:0; color:#065f46; font-size:18px; cursor:pointer; padding:0 4px; flex-shrink:0 }
 
   /* Netlify 리빌드 진행 배너 */
   .rebuild-banner { display:flex; align-items:center; gap:8px; background:#e0f2fe; border:1px solid #7dd3fc; border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#075985; white-space:pre-line }
@@ -371,8 +426,16 @@
 <div class="wrap">
   <header>
     <h1>🎬 yt-dlp webapp</h1>
-    <button id="cfgBtn" class="icon">⚙️ 설정</button>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button id="installBtn" class="icon" hidden type="button">📲 앱 설치</button>
+      <button id="cfgBtn" class="icon">⚙️ 설정</button>
+    </div>
   </header>
+
+  <div id="iosInstall" class="ios-install" hidden>
+    📲 홈 화면에 추가하면 앱처럼 사용할 수 있어요 → 하단 <strong>공유</strong> 버튼 → <strong>"홈 화면에 추가"</strong>
+    <button id="iosInstallDismiss" type="button">×</button>
+  </div>
 
   <div id="rebuildBanner" class="rebuild-banner" hidden>
     <span id="rebuildBannerText">🔄 업데이트 확인 중...</span>

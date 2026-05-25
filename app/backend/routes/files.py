@@ -85,6 +85,28 @@ async def download_archive(job_id: str, user=UserDep) -> FileResponse:
     )
 
 
+@router.get("/{job_id}/preview/{filename}")
+async def preview_file(job_id: str, filename: str, user=UserDep) -> FileResponse:
+    """다운로드 대신 브라우저에서 inline 렌더링 (HTML 미리보기 등)."""
+    _check_access(registry.get(job_id), user)
+    jdir = job_dir(job_id).resolve()
+    target = (jdir / filename).resolve()
+    if not str(target).startswith(str(jdir)):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    suffix = target.suffix.lower()
+    media_type = {
+        ".html": "text/html; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".vtt": "text/vtt; charset=utf-8",
+        ".srt": "text/plain; charset=utf-8",
+    }.get(suffix)
+    # filename 파라미터를 빼면 FileResponse가 Content-Disposition을 안 붙여서 inline 동작.
+    return FileResponse(target, media_type=media_type)
+
+
 @router.get("/{job_id}/{filename}")
 async def get_file(job_id: str, filename: str, user=UserDep) -> FileResponse:
     job = _check_access(registry.get(job_id), user)
