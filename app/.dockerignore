@@ -1,0 +1,32 @@
+# 빌드 컨텍스트에서 제외 (이미지 크기/빌드 속도 최적화)
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+
+# 로컬 다운로드 결과물 (컨테이너 안에는 빈 디렉터리만)
+downloads
+yt-dlp-downloads
+*.mp4
+*.webm
+*.vtt
+*.srt
+
+# 로컬 전용
+.env
+runtime_settings.json
+*.log
+
+# 배포 자체 산출물 (재귀 방지)
+fly.toml.bak
+
+# 프론트엔드 (Netlify에서 별도 서빙) — 컨테이너에는 폴백용으로만 들어감
+# frontend-html/  # 실제 포함됨 (FastAPI 폴백 응답용)
+
+# 스크립트들 (컨테이너에 불필요)
+scripts
