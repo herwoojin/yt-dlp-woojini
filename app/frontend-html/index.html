@@ -454,7 +454,43 @@
       sessionStorage.removeItem('ytdlp_unlocked')
       location.reload()
     }
+    renderTechStack()
     dlg.showModal()
+  }
+
+  async function renderTechStack() {
+    const box = $('#techStackBox')
+    box.innerHTML = '<div style="color:#94a3b8;font-size:12px">📚 기술 스택 로딩 중…</div>'
+    try {
+      const r = await fetch('/techstack.json', { cache: 'no-store' })
+      if (!r.ok) throw new Error(r.status)
+      const d = await r.json()
+      const arch = d.architectureSummary ? `<p class="ts-arch">${escape(d.architectureSummary)}</p>` : ''
+      const cats = (d.categories || []).map(cat => `
+        <details class="ts-cat" open>
+          <summary>${escape(cat.name)} <span class="ts-count">(${cat.items.length})</span></summary>
+          <ul class="ts-items">
+            ${cat.items.map(it => `
+              <li>
+                <div class="ts-name">${escape(it.name)}</div>
+                ${it.purpose ? `<div class="ts-purpose">${escape(it.purpose)}</div>` : ''}
+                ${it.config ? `<div class="ts-purpose ts-config">⚙️ ${escape(it.config)}</div>` : ''}
+              </li>`).join('')}
+          </ul>
+        </details>`).join('')
+      box.innerHTML = `
+        <div class="ts-header">
+          <strong>${escape(d.project || '프로젝트')}</strong>
+          <span style="font-size:11px;color:#64748b">업데이트: ${escape(d.lastUpdated || '-')}</span>
+        </div>
+        ${d.description ? `<div style="font-size:12px;color:#475569;margin-bottom:8px">${escape(d.description)}</div>` : ''}
+        ${arch}
+        ${cats}
+        ${d.repo ? `<div style="font-size:11px;margin-top:10px"><a href="${d.repo}" target="_blank" rel="noopener">📂 ${escape(d.repo)}</a></div>` : ''}
+      `
+    } catch (err) {
+      box.innerHTML = `<div class="admin-result admin-error">기술 스택 로드 실패: ${escape(String(err.message || err))}</div>`
+    }
   }
 
   $('#adminBtn').onclick = openAdminAuth
@@ -542,6 +578,20 @@
   .admin-ok { background:#dcfce7; color:#166534; border:1px solid #86efac }
   .admin-error { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5 }
 
+  /* 기술 스택 */
+  .ts-box { max-height:50vh; overflow-y:auto; padding-right:4px }
+  .ts-header { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:4px }
+  .ts-arch { font-size:12px; color:#475569; background:#f1f5f9; border-radius:8px; padding:8px 10px; margin:8px 0 12px; line-height:1.5 }
+  .ts-cat { margin:6px 0; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px }
+  .ts-cat summary { cursor:pointer; font-weight:600; font-size:13px; color:#1e293b }
+  .ts-count { color:#94a3b8; font-weight:400; font-size:11px }
+  .ts-items { list-style:none; padding:0; margin:8px 0 0 }
+  .ts-items li { padding:6px 0; border-bottom:1px dashed #f1f5f9; font-size:12px }
+  .ts-items li:last-child { border-bottom:0 }
+  .ts-name { font-weight:600; color:#0f172a }
+  .ts-purpose { color:#64748b; margin-top:2px; line-height:1.45 }
+  .ts-config { font-family:ui-monospace,monospace; font-size:11px; color:#475569 }
+
   /* iOS 설치 안내 */
   .ios-install { display:flex; align-items:center; gap:8px; background:#ecfdf5; border:1px solid #6ee7b7; border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#065f46 }
   .ios-install[hidden] { display:none }
@@ -624,6 +674,10 @@
     ⚠️ 비밀번호는 이 브라우저에만 저장됩니다 (다른 기기/브라우저에서는 기본값 2525).<br>
     잊으면 브라우저 사이트 데이터 삭제로 초기화 가능합니다.
   </div>
+
+  <hr style="border:0;border-top:1px solid #e2e8f0;margin:18px 0 12px" />
+  <h3 style="margin:0 0 8px;font-size:14px">📚 기술 스택</h3>
+  <div id="techStackBox" class="ts-box"></div>
 </dialog>
 
 <div class="wrap">
