@@ -96,13 +96,18 @@
     rebuildPoll = setInterval(tick, 5000)
   }
 
+  async function _parseResp(r) {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+    if (r.status === 204 || r.headers.get('content-length') === '0') return null
+    const ct = r.headers.get('content-type') || ''
+    return ct.includes('application/json') ? r.json() : r.text()
+  }
+
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
     try {
-      const r = await fetch(BASE + path, { ...init, headers })
-      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
-      return r.json()
+      return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
       // 어떤 source든 실패하면 tunnel.json/GitHub raw에서 다시 발견 후 1회 재시도
       // (localStorage에 옛 URL이 박혀 있어도 자동 복구 가능하도록)
@@ -110,9 +115,7 @@
       if (fresh && fresh !== BASE) {
         BASE = fresh
         BASE_SOURCE = 'auto'
-        const r2 = await fetch(BASE + path, { ...init, headers })
-        if (!r2.ok) throw new Error(`${r2.status} ${await r2.text()}`)
-        return r2.json()
+        return await _parseResp(await fetch(BASE + path, { ...init, headers }))
       }
       throw err
     }
@@ -250,8 +253,27 @@
       list.innerHTML = jobs.length === 0
         ? '<li style="color:#888;text-align:center;padding:24px">작업이 없습니다.</li>'
         : jobs.map(renderJob).join('')
+      // 카드 클릭 → 상세, 삭제 버튼 클릭 → 삭제 (이벤트 버블 차단)
       list.querySelectorAll('[data-id]').forEach((el) => {
         el.onclick = () => openDetail(el.dataset.id)
+      })
+      list.querySelectorAll('.job-delete').forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation()
+          const id = btn.dataset.id
+          const title = btn.dataset.title || id
+          if (!confirm(`"${title}"\n\n이 작업과 모든 산출물(영상/자막/HTML 등)을 서버에서 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return
+          btn.disabled = true
+          btn.textContent = '삭제 중…'
+          try {
+            await api('/api/jobs/' + id, { method: 'DELETE' })
+            await refresh()
+          } catch (err) {
+            alert('삭제 실패: ' + err.message)
+            btn.disabled = false
+            btn.textContent = '🗑'
+          }
+        }
       })
     } catch (err) {
       onConnectionFailed(err)
@@ -260,16 +282,23 @@
 
   function renderJob(j) {
     const pct = Math.round(j.progress * 100)
-    return `<li data-id="${j.id}" class="job">
+    const canDelete = j.status === 'done' || j.status === 'failed'
+    const titleAttr = (j.title || j.url).replace(/"/g, '&quot;')
+    return `<li class="job">
       <div class="row">
-        <strong>${escape(j.title || j.url)}</strong>
+        <div data-id="${j.id}" style="flex:1;min-width:0;cursor:pointer">
+          <strong>${escape(j.title || j.url)}</strong>
+        </div>
         <span class="badge st-${j.status}">${j.status}</span>
+        ${canDelete ? `<button class="job-delete" data-id="${j.id}" data-title="${titleAttr}" title="삭제" type="button">🗑</button>` : ''}
       </div>
-      <div class="meta">${escape(j.url)}</div>
-      ${j.status !== 'done' && j.status !== 'failed'
-        ? `<div class="bar"><div style="width:${pct}%"></div></div>`
-        : ''}
-      ${j.message ? `<div class="meta">${escape(j.message)}</div>` : ''}
+      <div data-id="${j.id}" style="cursor:pointer">
+        <div class="meta">${escape(j.url)}</div>
+        ${j.status !== 'done' && j.status !== 'failed'
+          ? `<div class="bar"><div style="width:${pct}%"></div></div>`
+          : ''}
+        ${j.message ? `<div class="meta">${escape(j.message)}</div>` : ''}
+      </div>
     </li>`
   }
 
@@ -451,8 +480,11 @@
   form button { flex:2; padding:12px; background:#059669; color:#fff; border:0; border-radius:10px; font-weight:600; cursor:pointer }
   form button:hover { background:#047857 }
   ul { list-style:none; padding:0; margin:12px 0; display:flex; flex-direction:column; gap:8px }
-  .job { background:#fff; border-radius:12px; padding:12px; cursor:pointer; transition:box-shadow .2s }
+  .job { background:#fff; border-radius:12px; padding:12px; transition:box-shadow .2s }
   .job:hover { box-shadow:0 2px 8px rgba(0,0,0,.08) }
+  .job-delete { background:transparent; border:1px solid #fca5a5; color:#dc2626; padding:4px 8px; border-radius:6px; font-size:13px; cursor:pointer; flex-shrink:0 }
+  .job-delete:hover { background:#fee2e2 }
+  .job-delete:disabled { opacity:0.5; cursor:wait }
   .row { display:flex; justify-content:space-between; align-items:center; gap:8px }
   .meta { color:#64748b; font-size:12px; word-break:break-all }
   .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#e2e8f0 }

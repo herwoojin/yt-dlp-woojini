@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 import traceback
 import uuid
 from datetime import datetime
@@ -81,6 +82,23 @@ class JobRegistry:
 
     def get(self, job_id: str) -> JobInfo | None:
         return self._jobs.get(job_id)
+
+    async def delete(self, job_id: str) -> bool:
+        """job_dir 전체 + 메모리 등록을 영구 삭제. 진행 중인 작업이면 False."""
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return False
+            if job.status in (JobStatus.PENDING, JobStatus.DOWNLOADING,
+                              JobStatus.TRANSCRIBING, JobStatus.GENERATING):
+                # 진행 중 삭제는 worker와 race condition이 위험하므로 거부
+                raise RuntimeError("진행 중인 작업은 삭제할 수 없습니다 (완료/실패 후 삭제하세요)")
+            jdir = storage.job_dir(job_id)
+            if jdir.exists():
+                shutil.rmtree(jdir, ignore_errors=True)
+            self._jobs.pop(job_id, None)
+            self._api_keys.pop(job_id, None)
+            return True
 
     async def submit(
         self,

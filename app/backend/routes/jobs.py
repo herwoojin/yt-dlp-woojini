@@ -41,3 +41,18 @@ async def get_job(job_id: str, user=UserDep) -> JobInfo:
     if job.owner_uid not in (None, user["uid"]) and not user["uid"].startswith("local"):
         raise HTTPException(status_code=403, detail="forbidden")
     return job
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_job(job_id: str, user=UserDep) -> None:
+    job = registry.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.owner_uid not in (None, user["uid"]) and not user["uid"].startswith("local"):
+        raise HTTPException(status_code=403, detail="forbidden")
+    try:
+        ok = await registry.delete(job_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="job not found")
