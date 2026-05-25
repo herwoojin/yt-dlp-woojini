@@ -15,6 +15,12 @@
   // yt-dlp webapp 프론트엔드 (단일 HTML)
   // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
 
+  // ─── 사이트 잠금 (클라이언트 사이드 — 우회 가능, 우연한 접근 차단용) ──
+  const DEFAULT_PW = '2525'
+  const getEntryPw = () => localStorage.getItem('ytdlp_entry_pw') || DEFAULT_PW
+  const getAdminPw = () => localStorage.getItem('ytdlp_admin_pw') || DEFAULT_PW
+  const isUnlocked = () => sessionStorage.getItem('ytdlp_unlocked') === '1'
+
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
   let BASE_SOURCE = 'localStorage'  // 'auto' | 'localStorage'
@@ -329,14 +335,107 @@
     }
   }
 
-  // 즉시 "연결 중" 표시 후 백엔드 URL 발견 → 첫 refresh
-  showConnecting()
-  $('#connRetryBtn').onclick = forceReconnect
-  ensureBase().then(() => {
-    maybeShowKeyWarning()
-    refresh()
-    setInterval(refresh, 3000)
-  })
+  // ─── 앱 시작 ─────────────────────────────────────────
+  function startApp() {
+    document.body.classList.remove('locked')
+    showConnecting()
+    $('#connRetryBtn').onclick = forceReconnect
+    ensureBase().then(() => {
+      maybeShowKeyWarning()
+      refresh()
+      setInterval(refresh, 3000)
+    })
+  }
+
+  // ─── 잠금 화면 ───────────────────────────────────────
+  function setupLock() {
+    const dlg = $('#lockScreen')
+    const pwInput = $('#lockPw')
+    const err = $('#lockError')
+    const tryUnlock = () => {
+      if (pwInput.value === getEntryPw()) {
+        sessionStorage.setItem('ytdlp_unlocked', '1')
+        dlg.close()
+        startApp()
+      } else {
+        err.hidden = false
+        pwInput.value = ''
+        pwInput.focus()
+      }
+    }
+    // ESC로 닫히지 않게
+    dlg.addEventListener('cancel', (e) => e.preventDefault())
+    $('#lockBtn').onclick = tryUnlock
+    pwInput.onkeydown = (e) => { if (e.key === 'Enter') tryUnlock() }
+    dlg.showModal()
+    setTimeout(() => pwInput.focus(), 100)
+  }
+
+  // ─── 관리자 모드 ─────────────────────────────────────
+  function openAdminAuth() {
+    const dlg = $('#adminAuthModal')
+    const pwInput = $('#adminAuthPw')
+    pwInput.value = ''
+    $('#adminAuthError').hidden = true
+    const submit = () => {
+      if (pwInput.value === getAdminPw()) {
+        dlg.close()
+        openAdminPanel()
+      } else {
+        $('#adminAuthError').hidden = false
+        pwInput.value = ''
+        pwInput.focus()
+      }
+    }
+    $('#adminAuthBtn').onclick = submit
+    $('#adminAuthCancel').onclick = () => dlg.close()
+    pwInput.onkeydown = (e) => { if (e.key === 'Enter') submit() }
+    dlg.showModal()
+    setTimeout(() => pwInput.focus(), 100)
+  }
+
+  function openAdminPanel() {
+    const dlg = $('#adminPanel')
+    $('#curEntryPw').textContent = getEntryPw()
+    $('#curAdminPw').textContent = getAdminPw()
+    $('#newEntryPw').value = ''
+    $('#newAdminPw').value = ''
+    $('#adminSaveResult').hidden = true
+    $('#adminSave').onclick = () => {
+      const ne = $('#newEntryPw').value.trim()
+      const na = $('#newAdminPw').value.trim()
+      if (!ne && !na) {
+        $('#adminSaveResult').textContent = '변경할 비밀번호를 입력하세요.'
+        $('#adminSaveResult').className = 'admin-result admin-error'
+        $('#adminSaveResult').hidden = false
+        return
+      }
+      if (ne) localStorage.setItem('ytdlp_entry_pw', ne)
+      if (na) localStorage.setItem('ytdlp_admin_pw', na)
+      $('#curEntryPw').textContent = getEntryPw()
+      $('#curAdminPw').textContent = getAdminPw()
+      $('#newEntryPw').value = ''
+      $('#newAdminPw').value = ''
+      $('#adminSaveResult').textContent = '✅ 저장되었습니다. (이 브라우저에서 유효)'
+      $('#adminSaveResult').className = 'admin-result admin-ok'
+      $('#adminSaveResult').hidden = false
+    }
+    $('#adminClose').onclick = () => dlg.close()
+    $('#adminLogout').onclick = () => {
+      sessionStorage.removeItem('ytdlp_unlocked')
+      location.reload()
+    }
+    dlg.showModal()
+  }
+
+  $('#adminBtn').onclick = openAdminAuth
+
+  // 시작: 잠금 상태면 잠금 화면, 풀려 있으면 앱 시작
+  if (isUnlocked()) {
+    startApp()
+  } else {
+    setupLock()
+  }
 </script>
 <style>
   :root { color-scheme: light; }
@@ -393,6 +492,24 @@
   .key-warning { display:none; background:#fef3c7; border:1px solid #fcd34d; border-radius:12px; padding:12px 14px; margin-bottom:12px; font-size:13px; color:#92400e }
   .key-warning button { background:#f59e0b; color:#fff; border:0; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; margin-left:8px }
 
+  /* 잠금 화면 + 관리자 다이얼로그 */
+  body.locked { overflow: hidden }
+  body.locked .wrap { filter: blur(8px); pointer-events: none; user-select: none }
+  .lock-dlg { border:0; border-radius:18px; padding:28px 24px; max-width:340px; width:90vw; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.3) }
+  .lock-dlg::backdrop { background:rgba(15,23,42,.6); backdrop-filter:blur(4px) }
+  .lock-dlg input[type=password], .lock-dlg input[type=text] { width:100%; padding:14px; border:2px solid #cbd5e1; border-radius:10px; font-size:20px; text-align:center; letter-spacing:8px; box-sizing:border-box }
+  .lock-dlg input[type=password]:focus, .lock-dlg input[type=text]:focus { outline:none; border-color:#059669 }
+  .lock-icon { font-size:48px; margin-bottom:4px }
+  .lock-error { color:#dc2626; font-size:12px; margin-top:8px; font-weight:600 }
+  .admin-dlg { border:0; border-radius:16px; padding:24px; max-width:480px; width:92vw; box-shadow:0 20px 60px rgba(0,0,0,.3) }
+  .admin-dlg::backdrop { background:rgba(15,23,42,.5) }
+  .admin-dlg input[type=text], .admin-dlg input[type=password] { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; box-sizing:border-box }
+  .admin-info { background:#f1f5f9; border-radius:8px; padding:10px 12px; font-size:12px; color:#334155; display:flex; flex-direction:column; gap:4px }
+  .admin-info code { background:#fff; padding:2px 6px; border-radius:4px; font-family:monospace }
+  .admin-result { padding:8px 12px; border-radius:8px; font-size:12px }
+  .admin-ok { background:#dcfce7; color:#166534; border:1px solid #86efac }
+  .admin-error { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5 }
+
   /* iOS 설치 안내 */
   .ios-install { display:flex; align-items:center; gap:8px; background:#ecfdf5; border:1px solid #6ee7b7; border-radius:12px; padding:10px 14px; margin-bottom:12px; font-size:12px; color:#065f46 }
   .ios-install[hidden] { display:none }
@@ -422,12 +539,67 @@
   .conn-fail { background:#ef4444 }
 </style>
 </head>
-<body>
+<body class="locked">
+
+<!-- 잠금 화면: 진입 비밀번호 입력 -->
+<dialog id="lockScreen" class="lock-dlg">
+  <div class="lock-icon">🔒</div>
+  <h2 style="margin:6px 0 4px;font-size:18px">잠긴 사이트</h2>
+  <p style="font-size:13px;color:#64748b;margin:0 0 14px">비밀번호를 입력하세요</p>
+  <input id="lockPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" />
+  <div id="lockError" class="lock-error" hidden>❌ 비밀번호가 틀립니다</div>
+  <button id="lockBtn" type="button" class="btn-primary" style="width:100%;margin-top:10px">잠금 해제</button>
+</dialog>
+
+<!-- 관리자 인증 -->
+<dialog id="adminAuthModal" class="admin-dlg">
+  <h2 style="margin:0 0 6px;font-size:16px">🔐 관리자 인증</h2>
+  <p style="font-size:12px;color:#64748b;margin:0 0 12px">관리자 비밀번호를 입력하세요</p>
+  <input id="adminAuthPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" />
+  <div id="adminAuthError" class="lock-error" hidden>❌ 관리자 비밀번호가 틀립니다</div>
+  <div class="btn-row" style="margin-top:10px">
+    <button id="adminAuthCancel" class="btn-secondary" type="button">취소</button>
+    <button id="adminAuthBtn" class="btn-primary" type="button">확인</button>
+  </div>
+</dialog>
+
+<!-- 관리자 패널 -->
+<dialog id="adminPanel" class="admin-dlg">
+  <h2 style="margin:0 0 12px;font-size:16px">🔧 관리자 모드</h2>
+  <div class="admin-info">
+    <div>현재 진입 비밀번호: <code id="curEntryPw"></code></div>
+    <div>현재 관리자 비밀번호: <code id="curAdminPw"></code></div>
+  </div>
+  <div class="settings-form" style="margin-top:14px">
+    <div>
+      <label>새 진입 비밀번호</label>
+      <input id="newEntryPw" type="text" autocomplete="off" placeholder="비워두면 변경 안 함" />
+    </div>
+    <div>
+      <label>새 관리자 비밀번호 (선택)</label>
+      <input id="newAdminPw" type="text" autocomplete="off" placeholder="비워두면 변경 안 함" />
+    </div>
+    <div id="adminSaveResult" class="admin-result" hidden></div>
+    <div class="btn-row" style="justify-content:space-between">
+      <button id="adminLogout" type="button" class="btn-secondary" style="background:#fee2e2;border-color:#fca5a5;color:#991b1b">🔒 잠그고 로그아웃</button>
+      <div style="display:flex;gap:8px">
+        <button id="adminClose" type="button" class="btn-secondary">닫기</button>
+        <button id="adminSave" type="button" class="btn-primary">저장</button>
+      </div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5">
+    ⚠️ 비밀번호는 이 브라우저에만 저장됩니다 (다른 기기/브라우저에서는 기본값 2525).<br>
+    잊으면 브라우저 사이트 데이터 삭제로 초기화 가능합니다.
+  </div>
+</dialog>
+
 <div class="wrap">
   <header>
     <h1>🎬 yt-dlp webapp</h1>
     <div style="display:flex;gap:6px;align-items:center">
       <button id="installBtn" class="icon" hidden type="button">📲 앱 설치</button>
+      <button id="adminBtn" class="icon" type="button">🔐 관리자</button>
       <button id="cfgBtn" class="icon">⚙️ 설정</button>
     </div>
   </header>
