@@ -309,14 +309,20 @@
     $('#dMeta').textContent = `${j.status} · ${Math.round(j.progress * 100)}% · Gemini ${j.quality}`
     $('#dChapters').innerHTML = j.chapters.map(c =>
       `<li><code>${c.time}</code> <b>${escape(c.title)}</b>${c.summary ? ' — ' + escape(c.summary) : ''}</li>`).join('')
-    $('#dArtifacts').innerHTML = j.artifacts.map(a => {
+    $('#dArtifacts').innerHTML = j.artifacts
+      .filter(a => a.kind !== 'blog_image')  // blog images are shown in blog preview
+      .map(a => {
       const previewable = /\.(html?|json|txt|vtt|srt)$/i.test(a.filename)
+      const isScreenshotZip = a.kind === 'screenshots_zip'
       const previewBtn = previewable
         ? `<a class="art-action art-preview" href="${BASE}/api/files/${j.id}/preview/${encodeURIComponent(a.filename)}" target="_blank" rel="noopener">👁 바로보기</a>`
         : ''
-      return `<li>
-        <span class="art-name">${escape(a.kind)} — ${escape(a.filename)}</span>
-        <span class="art-actions">${previewBtn}<a class="art-action" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>⬇ 다운로드</a></span>
+      const kindLabel = isScreenshotZip ? '📸 주요 장면 스크린샷' : escape(a.kind)
+      const dlClass = isScreenshotZip ? 'art-action art-screenshot-dl' : 'art-action'
+      const dlLabel = isScreenshotZip ? '📸 스크린샷 ZIP 다운로드' : '⬇ 다운로드'
+      return `<li${isScreenshotZip ? ' class="art-screenshot-row"' : ''}>
+        <span class="art-name">${kindLabel} — ${escape(a.filename)}</span>
+        <span class="art-actions">${previewBtn}<a class="${dlClass}" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>${dlLabel}</a></span>
       </li>`
     }).join('')
     const zipBtn = $('#dDownloadAll')
@@ -539,6 +545,9 @@
   #dArtifacts .art-action:hover { background:#e2e8f0 }
   #dArtifacts .art-preview { background:#dbeafe; color:#1e40af; border-color:#93c5fd }
   #dArtifacts .art-preview:hover { background:#bfdbfe }
+  #dArtifacts .art-screenshot-dl { background:#fef3c7; color:#92400e; border-color:#fcd34d; font-weight:600 }
+  #dArtifacts .art-screenshot-dl:hover { background:#fde68a }
+  .art-screenshot-row { background:#fffbeb !important; border-radius:8px; padding:8px !important; margin:4px 0 }
   button.icon { background:none; border:1px solid #cbd5e1; padding:6px 10px; border-radius:8px; font-size:12px; cursor:pointer }
   button.icon:hover { background:#f1f5f9 }
   #status { font-size:12px; color:#64748b; min-height:1em; margin-top:6px }

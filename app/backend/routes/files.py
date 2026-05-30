@@ -102,6 +102,10 @@ async def preview_file(job_id: str, filename: str, user=UserDep) -> FileResponse
         ".txt": "text/plain; charset=utf-8",
         ".vtt": "text/vtt; charset=utf-8",
         ".srt": "text/plain; charset=utf-8",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".png": "image/png",
     }.get(suffix)
     # filename 파라미터를 빼면 FileResponse가 Content-Disposition을 안 붙여서 inline 동작.
     return FileResponse(target, media_type=media_type)

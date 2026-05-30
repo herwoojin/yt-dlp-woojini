@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import config
 from .models import GeminiQuality, JobArtifact, JobInfo, JobStatus
-from .services import downloader, gemini, storage, transcript
+from .services import downloader, gemini, screenshot, storage, transcript
 
 log = logging.getLogger(__name__)
 
@@ -235,6 +235,23 @@ class JobRegistry:
             return
 
         video_title = info.get("title") or "yt-dlp 산출물"
+
+        # Screenshot capture: blog images + key scenes ZIP
+        await self._update(
+            job_id,
+            status=JobStatus.GENERATING,
+            progress=0.8,
+            message="영상 스크린샷 캡처 중",
+            artifacts=artifacts,
+        )
+        try:
+            artifacts, updated_blog_html = await self._run_screenshots(
+                job_id, jdir, info, results, artifacts,
+            )
+            results["blog_html"] = updated_blog_html
+        except Exception as exc:
+            log.warning("screenshot step failed (non-fatal): %s", exc)
+
         for fname, content in [
             ("chapters.json", json.dumps(results["chapters"], ensure_ascii=False, indent=2)),
             ("summary_short.html", _wrap_html(video_title + " — 요약", results["summary_short_html"])),
@@ -253,6 +270,78 @@ class JobRegistry:
             artifacts=artifacts,
             chapters=results["chapters"],
         )
+
+    async def _run_screenshots(
+        self,
+        job_id: str,
+        jdir: Path,
+        info: dict,
+        results: dict,
+        artifacts: list[JobArtifact],
+    ) -> tuple[list[JobArtifact], str]:
+        """Capture blog images + key scene screenshots. Returns (updated artifacts, updated blog_html)."""
+        blog_html = results["blog_html"]
+        video_path = self._find_video(jdir)
+        if not video_path:
+            log.warning("video file not found for screenshots in %s", jdir)
+            return artifacts, blog_html
+
+        # 1) Blog images: capture frames at Gemini-specified timestamps
+        blog_timestamps = results.get("blog_image_timestamps", [])
+        if blog_timestamps:
+            captured = await asyncio.to_thread(
+                screenshot.capture_blog_images,
+                video_path,
+                blog_timestamps,
+                jdir,
+            )
+            # Replace img src in blog HTML with API-accessible paths
+            for img in captured:
+                old_src = f'blog_img_{img["index"]}.jpg'
+                new_src = f'/api/files/{job_id}/{img["filename"]}'
+                blog_html = blog_html.replace(old_src, new_src)
+                artifacts.append(JobArtifact(
+                    kind="blog_image",
+                    filename=img["filename"],
+                    size_bytes=Path(jdir / img["filename"]).stat().st_size,
+                ))
+            log.info("captured %d/%d blog images", len(captured), len(blog_timestamps))
+
+        # 2) Key scene screenshots (~20 webp) + ZIP
+        chapters = results.get("chapters", [])
+        duration = info.get("duration")
+        scene_results = await asyncio.to_thread(
+            screenshot.capture_key_scenes,
+            video_path,
+            chapters,
+            duration,
+            jdir,
+            20,
+        )
+        if scene_results:
+            zip_path = await asyncio.to_thread(screenshot.create_screenshots_zip, jdir)
+            if zip_path and zip_path.exists():
+                artifacts.append(JobArtifact(
+                    kind="screenshots_zip",
+                    filename="screenshots.zip",
+                    size_bytes=zip_path.stat().st_size,
+                ))
+                log.info("screenshots.zip created with %d scenes", len(scene_results))
+
+        return artifacts, blog_html
+
+    @staticmethod
+    def _find_video(jdir: Path) -> Path | None:
+        """Find the downloaded video file in the job directory."""
+        for ext in (".mp4", ".webm", ".mkv"):
+            candidate = jdir / f"video{ext}"
+            if candidate.exists():
+                return candidate
+        # Fallback: any video-like file
+        for p in jdir.iterdir():
+            if p.suffix in (".mp4", ".webm", ".mkv") and p.stem.startswith("video"):
+                return p
+        return None
 
 
 registry = JobRegistry()

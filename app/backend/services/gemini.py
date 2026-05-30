@@ -137,7 +137,13 @@ def generate_blog_html(plain_text: str, title: str, chapters: list[dict], qualit
 - 도입(독자 hook) → 본문(챕터 기반 섹션 6~10개) → 결론/CTA
 - 각 섹션마다 소제목(h2), 본문 단락 2~4개, 필요시 불릿
 - 인라인 스타일, 가독성 좋은 폰트/크기/간격
-- 이미지 자리에는 <figure style="..."><div>📸 이미지 자리</div><figcaption>...</figcaption></figure>
+- 각 주요 섹션(최소 3개, 최대 8개)에 영상 캡처 이미지를 삽입하세요:
+  <figure style="margin:24px 0;text-align:center" data-timestamp="HH:MM:SS">
+    <img src="blog_img_N.jpg" alt="이미지 설명" style="max-width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+    <figcaption style="margin-top:8px;font-size:13px;color:#64748b">이미지 설명</figcaption>
+  </figure>
+  여기서 N은 1부터 순서대로, HH:MM:SS는 해당 섹션 내용에 가장 적합한 영상 타임스탬프
+  (목차의 시간을 참고하여 해당 섹션 내용이 나오는 시점의 타임스탬프를 정확히 지정)
 - 결과는 HTML 조각만 (코드펜스/설명 금지, <html>/<body> 불필요)
 - 글자수 1500~3000자
 
@@ -158,6 +164,55 @@ def _strip_fence(text: str) -> str:
     return text.strip()
 
 
+def extract_blog_image_timestamps(blog_html: str) -> list[dict]:
+    """Parse figure[data-timestamp] from blog HTML.
+
+    Returns a list of dicts:
+      [{"index": 1, "timestamp": "00:05:30", "alt": "설명"}, ...]
+    """
+    results: list[dict] = []
+    # Match <figure ... data-timestamp="HH:MM:SS" ...>
+    fig_pattern = re.compile(
+        r'<figure[^>]*data-timestamp=["\']([\d:]+)["\'][^>]*>',
+        re.IGNORECASE,
+    )
+    img_pattern = re.compile(
+        r'src=["\']blog_img_(\d+)\.jpg["\']',
+        re.IGNORECASE,
+    )
+    alt_pattern = re.compile(
+        r'alt=["\']([^"\']*)["\']',
+        re.IGNORECASE,
+    )
+
+    for fig_match in fig_pattern.finditer(blog_html):
+        ts = fig_match.group(1)
+        # Search for img tag near this figure
+        region = blog_html[fig_match.start():fig_match.start() + 500]
+        img_m = img_pattern.search(region)
+        alt_m = alt_pattern.search(region)
+        idx = int(img_m.group(1)) if img_m else len(results) + 1
+        alt = alt_m.group(1) if alt_m else ""
+        results.append({
+            "index": idx,
+            "timestamp": ts,
+            "alt": alt,
+        })
+
+    # Fallback: if Gemini didn't include data-timestamp, try to match img tags
+    if not results:
+        for img_m in img_pattern.finditer(blog_html):
+            idx = int(img_m.group(1))
+            alt_m = alt_pattern.search(blog_html[img_m.start():img_m.start() + 200])
+            results.append({
+                "index": idx,
+                "timestamp": "00:00:10",  # default fallback
+                "alt": alt_m.group(1) if alt_m else "",
+            })
+
+    return results
+
+
 def generate_all(job_dir: Path, title: str, quality: str, api_key: str | None = None) -> dict[str, Any]:
     """Reads plain + timed transcripts from job_dir and produces all four outputs."""
     plain_path = job_dir / "transcript.txt"
@@ -169,9 +224,11 @@ def generate_all(job_dir: Path, title: str, quality: str, api_key: str | None = 
     summary_short = generate_short_summary_html(plain_text, title, quality, api_key=api_key)
     email_html = generate_email_html(plain_text, title, chapters, quality, api_key=api_key)
     blog_html = generate_blog_html(plain_text, title, chapters, quality, api_key=api_key)
+    blog_image_timestamps = extract_blog_image_timestamps(blog_html)
     return {
         "chapters": chapters,
         "summary_short_html": summary_short,
         "email_html": email_html,
         "blog_html": blog_html,
+        "blog_image_timestamps": blog_image_timestamps,
     }
