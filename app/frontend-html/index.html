@@ -160,7 +160,7 @@
 
   // ─── API 키 경고 배너 ─────────────────────────────
   function maybeShowKeyWarning() {
-    if (!GEMINI_KEY && BASE && !BASE.includes('localhost') && !BASE.includes('127.0.0.1')) {
+    if (!GEMINI_KEY) {
       $('#keyWarning').style.display = 'block'
     }
   }
@@ -202,7 +202,7 @@
     banner.hidden = false
     banner.className = 'conn-status conn-' + kind
     $('#connStatusText').innerHTML = html
-    $('#connRetryBtn').hidden = (kind === 'connecting')
+    $('#connRetryBtn').hidden = (kind === 'connecting' || kind === 'idle')
   }
 
   function showConnecting() {
@@ -400,13 +400,22 @@
   // ─── 앱 시작 ─────────────────────────────────────────
   function startApp() {
     document.body.classList.remove('locked')
+    $('#connRetryBtn').onclick = connectBackend
+    $('#connectBtn').onclick = connectBackend
+    maybeShowKeyWarning()
+    // 자동 연결하지 않는다 — 설정(URL/키)을 먼저 넣고 사용자가 직접 🔌 버튼을 누른다.
+    // (백엔드가 죽어 있어도 무한 "연결 중" 루프에 빠지지 않게)
+    setConnStatus('idle',
+      `⏸️ 백엔드에 아직 연결하지 않았습니다. ⚙️ 설정에서 URL / Gemini API 키를 넣은 뒤 상단 <strong>🔌 백엔드 연결</strong> 버튼을 누르세요.`)
+    list.innerHTML = `<li style="color:#94a3b8;text-align:center;padding:32px">⏸️ 백엔드 미연결<div style="font-size:11px;margin-top:8px">⚙️ 설정 입력 후 상단 🔌 백엔드 연결 버튼을 누르세요</div></li>`
+  }
+
+  async function connectBackend() {
+    connState.failStreak = 0
     showConnecting()
-    $('#connRetryBtn').onclick = forceReconnect
-    ensureBase().then(() => {
-      maybeShowKeyWarning()
-      refresh()
-      startPolling()
-    })
+    await ensureBase()
+    await refresh()
+    startPolling()
   }
 
   // ─── 잠금 화면 ───────────────────────────────────────
@@ -777,6 +786,7 @@
     <h1>🎬 [JINI+US]YOUTUBE분석기</h1>
     <div style="display:flex;gap:6px;align-items:center">
       <button id="installBtn" class="icon" hidden type="button">📲 앱 설치</button>
+      <button id="connectBtn" class="icon" type="button">🔌 백엔드 연결</button>
       <button id="adminBtn" class="icon" type="button">🔐 관리자</button>
       <button id="cfgBtn" class="icon">⚙️ 설정</button>
     </div>
