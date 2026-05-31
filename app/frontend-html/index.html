@@ -34,7 +34,9 @@
 
   async function fetchTunnelJson(url) {
     try {
-      const r = await fetch(url, { cache: 'no-store' })
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 6000)
+      const r = await fetch(url, { cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(timer))
       if (!r.ok) return null
       const j = await r.json()
       if (!j || !j.base) return null
@@ -180,6 +182,10 @@
 
   // ─── 연결 상태 ────────────────────────────────────
   let connState = { everConnected: false, failStreak: 0, lastError: null }
+  const MAX_FAIL_BEFORE_STOP = 4   // 이 횟수만큼 실패하면 자동 재시도를 멈춘다
+  let pollTimer = null
+  function startPolling() { if (!pollTimer) pollTimer = setInterval(refresh, 3000) }
+  function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
   function setConnStatus(kind, html) {
     // kind: 'connecting' | 'failed' | 'ok' | 'no-base'
@@ -230,6 +236,17 @@
       // 이전엔 연결됐었음 → 작은 배너만, 작업 목록 유지
       setConnStatus('failed',
         `⚠️ 연결 일시 끊김 <span style="opacity:.7">(${connState.failStreak}회 재시도 중)</span>`)
+    }
+    // 일정 횟수 이상 실패하면 자동 재시도를 멈춰서 "연결 중" 무한 루프를 끊는다.
+    // (이래야 ⚙️ 설정에서 URL/API 키를 차분히 입력할 수 있다)
+    if (connState.failStreak >= MAX_FAIL_BEFORE_STOP) {
+      stopPolling()
+      setConnStatus('failed',
+        `⛔ 백엔드 연결을 일시 중단했습니다 <span style="opacity:.7">(${connState.failStreak}회 실패)</span><br>` +
+        `<span style="font-size:11px;opacity:.7">⚙️ 설정에서 백엔드 URL / Gemini API 키를 입력하거나 '다시 시도'를 누르세요.</span>`)
+      if (!connState.everConnected) {
+        list.innerHTML = `<li style="color:#94a3b8;text-align:center;padding:32px">⛔ 연결 중단됨<div style="font-size:11px;margin-top:8px">⚙️ 설정에서 URL / 키 입력 후 '다시 시도'를 누르세요</div></li>`
+      }
     }
   }
 
@@ -378,7 +395,7 @@
     ensureBase().then(() => {
       maybeShowKeyWarning()
       refresh()
-      setInterval(refresh, 3000)
+      startPolling()
     })
   }
 
