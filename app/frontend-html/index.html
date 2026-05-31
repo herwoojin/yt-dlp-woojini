@@ -628,7 +628,63 @@
   .conn-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px }
   .conn-ok { background:#10b981 }
   .conn-fail { background:#ef4444 }
-</style>
+
+        /* ===== 로딩 중 엣지 그라데이션 글로우 (분석 진행 블럭) ===== */
+        @property --edge-angle {
+            syntax: '<angle>';
+            initial-value: 0deg;
+            inherits: false;
+        }
+        .loading-glow {
+            position: relative;
+            z-index: 0;
+            isolation: isolate;
+            overflow: visible !important;
+        }
+        /* 테두리를 따라 흐르는 그라데이션 링 */
+        .loading-glow::before {
+            content: "";
+            position: absolute;
+            inset: -2px;
+            border-radius: inherit;
+            padding: 2px;
+            background: conic-gradient(from var(--edge-angle),
+                #ff5f6d, #ffc371, #fff07c, #47e891,
+                #4facfe, #b06ab3, #ff8fab, #ff5f6d);
+            -webkit-mask:
+                linear-gradient(#000 0 0) content-box,
+                linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+                    mask:
+                linear-gradient(#000 0 0) content-box,
+                linear-gradient(#000 0 0);
+                    mask-composite: exclude;
+            animation: edgeSpin 3.2s linear infinite;
+            z-index: -1;
+            pointer-events: none;
+        }
+        /* 보더 뒤쪽 흐릿한 네온 글로우 */
+        .loading-glow::after {
+            content: "";
+            position: absolute;
+            inset: -3px;
+            border-radius: inherit;
+            background: conic-gradient(from var(--edge-angle),
+                #ff5f6d, #ffc371, #fff07c, #47e891,
+                #4facfe, #b06ab3, #ff8fab, #ff5f6d);
+            filter: blur(14px);
+            opacity: 0.7;
+            animation: edgeSpin 3.2s linear infinite;
+            z-index: -2;
+            pointer-events: none;
+        }
+        @keyframes edgeSpin {
+            to { --edge-angle: 360deg; }
+        }
+        @supports not (background: conic-gradient(from 0deg, red, blue)) {
+            .loading-glow::before, .loading-glow::after { animation: none; }
+        }
+        </style>
 </head>
 <body class="locked">
 
@@ -777,5 +833,59 @@
     </div>
   </div>
 </dialog>
+
+<script>
+/* 로딩 중 엣지 그라데이션 글로우 컨트롤러 (제너릭) */
+(function(){
+  if (window.__edgeGlowInstalled) return;
+  window.__edgeGlowInstalled = true;
+  var IN_PROGRESS = /st-(download|generat|queu|pend|process|run|start|wait|extract|transcrib|analyz|prepar|upload|busy)/i;
+  var TERMINAL = /st-(done|complete|finish|fail|error|cancel|ready|idle)/i;
+  function findCard(badge){
+    var el = badge.parentElement;
+    while (el && el !== document.body){
+      if (el.querySelector && (el.querySelector('.job-delete') || /(^|\s)(job|card)/.test(el.className||''))) return el;
+      el = el.parentElement;
+    }
+    el = badge.parentElement;
+    while (el && el !== document.body){
+      if (el.offsetHeight > 50) return el;
+      el = el.parentElement;
+    }
+    return badge.parentElement;
+  }
+  function scan(){
+    var badges = document.querySelectorAll('[class*="st-"]');
+    var anyProgress = false;
+    badges.forEach(function(b){
+      var cls = b.className || '';
+      if (!/st-/.test(cls)) return;
+      var card = findCard(b);
+      if (!card) return;
+      if (IN_PROGRESS.test(cls)){ card.classList.add('loading-glow'); anyProgress = true; }
+      else if (TERMINAL.test(cls)){ card.classList.remove('loading-glow'); }
+    });
+    if (anyProgress){
+      document.querySelectorAll('form.loading-glow').forEach(function(f){ f.classList.remove('loading-glow'); });
+    }
+  }
+  function init(){
+    var form = document.querySelector('form');
+    if (form){
+      form.addEventListener('submit', function(){
+        form.classList.add('loading-glow');
+        setTimeout(function(){ form.classList.remove('loading-glow'); }, 60000);
+      });
+    }
+    try {
+      var mo = new MutationObserver(function(){ scan(); });
+      mo.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['class']});
+    } catch(e){}
+    scan();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
 </body>
 </html>
