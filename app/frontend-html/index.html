@@ -42,6 +42,9 @@
     } catch (_) { return null }
   }
 
+  // 자동 발견된 "정답" 백엔드 URL (설정 모달 기본값 / 자가복구에 사용)
+  let CANONICAL_BASE = ''
+
   async function checkRebuildState() {
     const [netlify, github] = await Promise.all([
       fetchTunnelJson('/tunnel.json'),
@@ -49,6 +52,7 @@
     ])
     if (!github && !netlify) return null
     const truth = github || netlify
+    CANONICAL_BASE = truth.base
     const rebuilding = !!(github && (!netlify || netlify.base !== github.base))
     return { rebuilding, canonical: truth, netlify, github }
   }
@@ -127,12 +131,23 @@
 
   // ─── 설정 모달 ────────────────────────────────────
   const settingsModal = $('#settingsModal')
-  $('#cfgBtn').onclick = () => {
-    $('#cfgBase').value = BASE
+  $('#cfgBtn').onclick = async () => {
+    // 연결 재시도 루프를 멈춰 설정 입력을 방해하지 않게 한다
+    pauseRefresh()
+    // 저장된 주소가 비었거나 죽었으면, 자동 발견된 정답 주소를 기본값으로 채운다
+    if (!CANONICAL_BASE) { try { await discoverTunnelUrl() } catch (_) {} }
+    $('#cfgBase').value = BASE || CANONICAL_BASE || ''
     $('#cfgGeminiKey').value = GEMINI_KEY
+    if (CANONICAL_BASE) {
+      $('#cfgBaseHint').hidden = false
+      $('#cfgUseCanonical').textContent = `↩ 현재 작동 주소 사용: ${CANONICAL_BASE}`
+      $('#cfgUseCanonical').onclick = () => { $('#cfgBase').value = CANONICAL_BASE }
+    } else {
+      $('#cfgBaseHint').hidden = true
+    }
     settingsModal.showModal()
   }
-  $('#cfgClose').onclick = () => settingsModal.close()
+  $('#cfgClose').onclick = () => { settingsModal.close(); startRefreshLoop() }
   $('#cfgSave').onclick = () => {
     const newCfg = {
       base: $('#cfgBase').value.trim().replace(/\/$/, ''),
@@ -189,6 +204,8 @@
     banner.className = 'conn-status conn-' + kind
     $('#connStatusText').innerHTML = html
     $('#connRetryBtn').hidden = (kind === 'connecting')
+    // 설정 열기 버튼은 'ok'가 아닐 때 항상 노출 → 연결 중에도 설정에 진입 가능
+    $('#connSettingsBtn').hidden = false
   }
 
   function showConnecting() {
@@ -209,6 +226,13 @@
   function onConnectionFailed(err) {
     connState.failStreak++
     connState.lastError = err && err.message ? err.message : String(err)
+    // 자가복구: 저장된 주소가 계속 실패하고, 자동 발견된 정답 주소가 다르면 그쪽으로 전환
+    if (connState.failStreak >= 2 && CANONICAL_BASE && CANONICAL_BASE !== BASE) {
+      BASE = CANONICAL_BASE
+      BASE_SOURCE = 'auto'
+    } else if (connState.failStreak === 2 && !CANONICAL_BASE) {
+      discoverTunnelUrl().catch(() => {})  // 다음 주기에 CANONICAL_BASE 사용 가능하도록
+    }
     if (!BASE) {
       setConnStatus('no-base', '⚠️ 백엔드 URL이 설정되지 않았습니다. <strong>⚙️ 설정</strong> 버튼을 눌러 입력하세요.')
       if (!connState.everConnected) {
@@ -371,14 +395,24 @@
   }
 
   // ─── 앱 시작 ─────────────────────────────────────────
+  let refreshTimer = null
+  function startRefreshLoop() {
+    if (refreshTimer) return
+    refreshTimer = setInterval(refresh, 3000)
+  }
+  function pauseRefresh() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+  }
+
   function startApp() {
     document.body.classList.remove('locked')
     showConnecting()
     $('#connRetryBtn').onclick = forceReconnect
+    $('#connSettingsBtn').onclick = () => $('#cfgBtn').onclick()
     ensureBase().then(() => {
       maybeShowKeyWarning()
       refresh()
-      setInterval(refresh, 3000)
+      startRefreshLoop()
     })
   }
 
@@ -769,6 +803,7 @@
   <div id="connStatus" class="conn-status" hidden>
     <span id="connStatusText"></span>
     <button id="connRetryBtn" hidden type="button">다시 시도</button>
+    <button id="connSettingsBtn" type="button">⚙️ 설정 열기</button>
   </div>
 
   <div id="keyWarning" class="key-warning">
@@ -815,6 +850,9 @@
     <div>
       <label>🌐 백엔드 서버 URL</label>
       <input id="cfgBase" type="url" placeholder="https://your-tunnel.trycloudflare.com" />
+      <div id="cfgBaseHint" hidden style="margin-top:6px">
+        <button id="cfgUseCanonical" type="button" style="background:#ecfdf5;border:1px solid #34d399;color:#065f46;font-size:12px;padding:6px 10px;border-radius:8px;cursor:pointer;width:100%;text-align:left">↩ 현재 작동 주소 사용</button>
+      </div>
       <div class="hint">비워두면 현재 페이지와 같은 서버를 사용합니다. Netlify에서는 Cloudflare 터널 URL을 입력하세요.</div>
     </div>
     <div>
