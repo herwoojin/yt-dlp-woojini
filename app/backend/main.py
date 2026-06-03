@@ -62,3 +62,9 @@ def health() -> dict[str, str]:
 def root():
     index = FRONTEND_DIR / "index.html"
     return HTMLResponse(index.read_text(encoding="utf-8"))
+
+
+@app.get("/blog-studio.html", response_class=HTMLResponse)
+def blog_studio():
+    page = FRONTEND_DIR / "blog-studio.html"
+    return HTMLResponse(page.read_text(encoding="utf-8"))
