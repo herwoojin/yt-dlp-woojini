@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>🖼 참조 이미지 — [JINI+US]</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#7c3aed" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<link rel="apple-touch-icon" href="/icon.svg" />
+<script type="module">
+  // ── 블로그에 참조된 이미지(blog_image)를 영상별로 모아 보여주는 전용 페이지 ──
+  // index.html / blog-studio.html 과 동일한 백엔드 연결 방식을 재사용한다.
+
+  const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
+  let BASE = cfg.base || ''
+  const GEMINI_KEY = cfg.gemini_key || ''
+  const GITHUB_RAW_TUNNEL = 'https://raw.githubusercontent.com/herwoojin/yt-dlp-woojini/master/app/frontend-html/tunnel.json'
+
+  async function fetchTunnelJson(url) {
+    try {
+      const r = await fetch(url, { cache: 'no-store' })
+      if (!r.ok) return null
+      const j = await r.json()
+      if (!j || !j.base) return null
+      return { base: String(j.base).replace(/\/$/, ''), updated: j.updated || null }
+    } catch (_) { return null }
+  }
+  async function discoverTunnelUrl() {
+    const [netlify, github] = await Promise.all([
+      fetchTunnelJson('/tunnel.json'),
+      fetchTunnelJson(GITHUB_RAW_TUNNEL),
+    ])
+    const truth = github || netlify
+    return truth ? truth.base : null
+  }
+  async function ensureBase() {
+    if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); return }
+    const found = await discoverTunnelUrl()
+    if (found) BASE = found
+  }
+  async function _parseResp(r) {
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+    if (r.status === 204 || r.headers.get('content-length') === '0') return null
+    const ct = r.headers.get('content-type') || ''
+    return ct.includes('application/json') ? r.json() : r.text()
+  }
+  async function api(path, init = {}) {
+    const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
+    if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    try {
+      return await _parseResp(await fetch(BASE + path, { ...init, headers }))
+    } catch (err) {
+      const fresh = await discoverTunnelUrl()
+      if (fresh && fresh !== BASE) {
+        BASE = fresh
+        return await _parseResp(await fetch(BASE + path, { ...init, headers }))
+      }
+      throw err
+    }
+  }
+
+  const $ = (sel) => document.querySelector(sel)
+  const escape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+  const fileUrl = (jobId, fn) => `${BASE}/api/files/${jobId}/${encodeURIComponent(fn)}`
+
+  async function load() {
+    const root = $('#content')
+    root.innerHTML = '<div class="loading">🔄 백엔드에 연결 중…</div>'
+    try {
+      await ensureBase()
+      const jobs = await api('/api/jobs')
+      const withImgs = (jobs || [])
+        .map(j => ({ j, imgs: (j.artifacts || []).filter(a => a.kind === 'blog_image') }))
+        .filter(x => x.imgs.length > 0)
+
+      if (withImgs.length === 0) {
+        root.innerHTML = '<div class="empty">참조 이미지가 있는 작업이 아직 없습니다.<br><span>영상을 분석하면 블로그에 사용된 이미지가 여기 모입니다.</span></div>'
+        return
+      }
+      const total = withImgs.reduce((n, x) => n + x.imgs.length, 0)
+      $('#count').textContent = `${withImgs.length}개 영상 · 이미지 ${total}장`
+
+      root.innerHTML = withImgs.map(({ j, imgs }) => `
+        <section class="vid">
+          <h2 title="${escape(j.title || j.url)}">${escape(j.title || j.url)}</h2>
+          <div class="meta"><a href="${escape(j.url)}" target="_blank" rel="noopener">${escape(j.url)}</a> · 이미지 ${imgs.length}장</div>
+          <div class="grid">
+            ${imgs.map(a => {
+              const u = fileUrl(j.id, a.filename)
+              return `<a class="thumb" href="${u}" target="_blank" rel="noopener" title="${escape(a.filename)}">
+                <img loading="lazy" src="${u}" alt="${escape(a.filename)}" />
+                <span class="dl" data-url="${u}" data-fn="${escape(a.filename)}">⬇</span>
+              </a>`
+            }).join('')}
+          </div>
+        </section>`).join('')
+
+      // 다운로드 버튼 (이미지 새 탭 열림과 충돌 방지)
+      root.querySelectorAll('.dl').forEach(btn => {
+        btn.onclick = (e) => {
+          e.preventDefault(); e.stopPropagation()
+          const a = document.createElement('a')
+          a.href = btn.dataset.url; a.download = btn.dataset.fn
+          document.body.appendChild(a); a.click(); a.remove()
+        }
+      })
+    } catch (err) {
+      root.innerHTML = `<div class="empty">❌ 백엔드에 연결할 수 없습니다.<br><span>${escape(String(err.message || err))}</span></div>`
+    }
+  }
+
+  $('#reloadBtn').onclick = load
+  load()
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+</script>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', sans-serif; background:#faf8ff; margin:0; padding:16px; color:#1e293b; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  h1.page-title { font-size:20px; margin:0; flex:1; }
+  .nav-actions { display:flex; gap:8px; }
+  button.icon, a.icon button { font-size:13px; padding:8px 12px; border-radius:10px; border:1px solid #ddd6fe; background:#fff; cursor:pointer; }
+  a.icon { text-decoration:none; }
+  #count { color:#7c3aed; font-size:13px; margin:0 0 14px; font-weight:600; }
+  .loading, .empty { text-align:center; color:#94a3b8; padding:48px 16px; }
+  .empty span { font-size:13px; color:#cbd5e1; }
+  section.vid { background:#fff; border:1px solid #ece9fb; border-radius:14px; padding:14px 16px; margin-bottom:16px; }
+  section.vid h2 { font-size:15px; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  section.vid .meta { font-size:12px; color:#94a3b8; margin-bottom:12px; }
+  section.vid .meta a { color:#a78bfa; text-decoration:none; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px; }
+  .thumb { position:relative; display:block; aspect-ratio:16/9; border-radius:10px; overflow:hidden; background:#f1f5f9; border:1px solid #eee; }
+  .thumb img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .2s; }
+  .thumb:hover img { transform:scale(1.04); }
+  .thumb .dl { position:absolute; right:6px; bottom:6px; background:rgba(15,23,42,.72); color:#fff; font-size:13px; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; }
+  .thumb .dl:hover { background:#7c3aed; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 class="page-title">🖼 참조 이미지</h1>
+      <div class="nav-actions">
+        <a class="icon" href="/blog-studio.html"><button class="icon" type="button">📚 블로그 스튜디오</button></a>
+        <a class="icon" href="/index.html"><button class="icon" type="button">🎬 분석기로</button></a>
+        <button id="reloadBtn" class="icon" type="button">🔄 새로고침</button>
+      </div>
+    </header>
+    <p id="count"></p>
+    <div id="content"></div>
+  </div>
+</body>
+</html>

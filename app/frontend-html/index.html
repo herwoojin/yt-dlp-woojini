@@ -449,7 +449,8 @@
     const submit = () => {
       if (pwInput.value === getAdminPw()) {
         dlg.close()
-        openAdminPanel()
+        // 관리자 인증 성공 → 블로그 스튜디오로 바로 이동
+        location.href = '/blog-studio.html'
       } else {
         $('#adminAuthError').hidden = false
         pwInput.value = ''
