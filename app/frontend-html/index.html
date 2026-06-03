@@ -908,6 +908,15 @@
       document.querySelectorAll('form.loading-glow').forEach(function(f){ f.classList.remove('loading-glow'); });
     }
   }
+  // scan()이 class를 바꾸는데, 그 변화를 다시 관찰하면 무한 루프(→ 페이지 멈춤)다.
+  // 그래서 ① 잡 목록(#jobs)의 childList만 관찰하고 attributes는 관찰하지 않으며
+  //        ② rAF로 디바운스해 연속 변경을 한 번으로 합친다.
+  var scanScheduled = false;
+  function scheduleScan(){
+    if (scanScheduled) return;
+    scanScheduled = true;
+    requestAnimationFrame(function(){ scanScheduled = false; scan(); });
+  }
   function init(){
     var form = document.querySelector('form');
     if (form){
@@ -917,8 +926,9 @@
       });
     }
     try {
-      var mo = new MutationObserver(function(){ scan(); });
-      mo.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['class']});
+      var target = document.getElementById('jobs') || document.body;
+      var mo = new MutationObserver(scheduleScan);
+      mo.observe(target, {subtree:true, childList:true});
     } catch(e){}
     scan();
   }
