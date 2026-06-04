@@ -56,9 +56,30 @@ class JobRegistry:
         self._jobs: dict[str, JobInfo] = {}
         self._queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
         self._api_keys: dict[str, str] = {}  # job_id -> gemini api key (메모리 only)
+        self._cancelled: set[str] = set()  # 사용자가 중지 요청한 job_id
         self._lock = asyncio.Lock()
         self._worker_task: asyncio.Task | None = None
         self._load_from_disk()
+
+    _ACTIVE = (JobStatus.PENDING, JobStatus.DOWNLOADING,
+               JobStatus.TRANSCRIBING, JobStatus.GENERATING)
+
+    def is_cancelled(self, job_id: str) -> bool:
+        return job_id in self._cancelled
+
+    async def request_cancel(self, job_id: str) -> bool:
+        """진행 중인 작업에 중지 플래그를 세우고 즉시 CANCELLED로 표시한다.
+        이미 끝난(완료/실패/취소) 작업이면 False."""
+        job = self._jobs.get(job_id)
+        if not job or job.status not in self._ACTIVE:
+            return False
+        self._cancelled.add(job_id)
+        await self._update(
+            job_id,
+            status=JobStatus.CANCELLED,
+            message="사용자가 중지함",
+        )
+        return True
 
     def _load_from_disk(self) -> None:
         base = config.get_download_dir()
@@ -134,6 +155,12 @@ class JobRegistry:
     async def _update(self, job_id: str, **fields) -> JobInfo:
         async with self._lock:
             job = self._jobs[job_id]
+            # 중지된 작업은 진행 중이던 단계가 뒤늦게 끝나도 되살아나지 않게 한다.
+            # (CANCELLED/FAILED 같은 종료 상태로의 갱신만 허용)
+            if job_id in self._cancelled and fields.get("status") not in (
+                JobStatus.CANCELLED, JobStatus.FAILED,
+            ):
+                return job
             data = job.model_dump()
             data.update(fields)
             data["updated_at"] = datetime.utcnow()
@@ -156,6 +183,7 @@ class JobRegistry:
                 await self._update(job_id, status=JobStatus.FAILED, error=traceback.format_exc())
             finally:
                 self._api_keys.pop(job_id, None)  # 사용 후 메모리에서 삭제
+                self._cancelled.discard(job_id)
                 self._queue.task_done()
 
     async def _run_job(self, job_id: str, gemini_api_key: str | None = None) -> None:
@@ -163,6 +191,8 @@ class JobRegistry:
         jdir = storage.job_dir(job_id)
 
         # 1) download
+        if self.is_cancelled(job_id):
+            return
         await self._update(job_id, status=JobStatus.DOWNLOADING, progress=0.05, message="영상 다운로드 중")
         info = await asyncio.to_thread(
             downloader.download,
@@ -208,6 +238,8 @@ class JobRegistry:
             )
             return
 
+        if self.is_cancelled(job_id):
+            return
         await self._update(
             job_id,
             status=JobStatus.GENERATING,
@@ -224,14 +256,30 @@ class JobRegistry:
                 api_key=gemini_api_key,
             )
         except Exception as exc:
+            reason = str(exc)
+            low = reason.lower()
+            if "timeout" in low or "deadline" in low or "timed out" in low:
+                hint = (f"Gemini 응답 시간 초과({config.GEMINI_TIMEOUT_SEC}초). "
+                        "네트워크 지연/모델 과부하이거나 자막이 너무 길 수 있습니다.")
+            elif "api key" in low or "permission" in low or "401" in low or "403" in low:
+                hint = "Gemini API 키가 유효하지 않거나 권한이 없습니다. 설정에서 키를 확인하세요."
+            elif "429" in low or "quota" in low or "rate" in low:
+                hint = "Gemini API 사용량/쿼터 한도에 걸렸습니다. 잠시 후 다시 시도하세요."
+            else:
+                hint = f"Gemini 단계 실패: {reason[:200]}"
             log.warning("gemini step failed (non-fatal): %s", exc)
+            # 중지된 작업이면 CANCELLED 유지 (DONE으로 덮지 않음)
+            if self.is_cancelled(job_id):
+                return
             await self._update(
                 job_id,
                 status=JobStatus.DONE,
                 progress=1.0,
-                message=f"영상/스크립트는 저장됨. Gemini 단계 건너뜀: {str(exc)[:200]}",
+                message=f"영상/스크립트는 저장됨. {hint}",
                 artifacts=artifacts,
             )
+            return
+        if self.is_cancelled(job_id):
             return
 
         video_title = info.get("title") or "yt-dlp 산출물"

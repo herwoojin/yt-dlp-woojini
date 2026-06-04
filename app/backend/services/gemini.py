@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from google import genai
+from google.genai import types
 
 from .. import config
 
@@ -20,17 +21,22 @@ log = logging.getLogger(__name__)
 _client: genai.Client | None = None
 
 
+def _http_options() -> types.HttpOptions:
+    # 타임아웃은 밀리초 단위. 초과 시 SDK가 예외를 던져 무한 대기를 방지한다.
+    return types.HttpOptions(timeout=config.GEMINI_TIMEOUT_SEC * 1000)
+
+
 def _get_client(api_key: str | None = None) -> genai.Client:
     """Return a genai Client. If *api_key* is given, create a throwaway
     client for that key (per-request). Otherwise fall back to the
     server-wide key from config / .env."""
     if api_key:
-        return genai.Client(api_key=api_key)
+        return genai.Client(api_key=api_key, http_options=_http_options())
     global _client
     if _client is None:
         if not config.GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY 미설정 - .env 확인 또는 프론트엔드에서 API 키를 입력하세요")
-        _client = genai.Client(api_key=config.GEMINI_API_KEY)
+        _client = genai.Client(api_key=config.GEMINI_API_KEY, http_options=_http_options())
     return _client
 
 

@@ -43,6 +43,19 @@ async def get_job(job_id: str, user=UserDep) -> JobInfo:
     return job
 
 
+@router.post("/{job_id}/cancel", response_model=JobInfo)
+async def cancel_job(job_id: str, user=UserDep) -> JobInfo:
+    job = registry.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.owner_uid not in (None, user["uid"]) and not user["uid"].startswith("local"):
+        raise HTTPException(status_code=403, detail="forbidden")
+    ok = await registry.request_cancel(job_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail="이미 완료/실패/취소된 작업입니다")
+    return registry.get(job_id)
+
+
 @router.delete("/{job_id}", status_code=204)
 async def delete_job(job_id: str, user=UserDep) -> None:
     job = registry.get(job_id)

@@ -281,6 +281,24 @@
       list.querySelectorAll('[data-id]').forEach((el) => {
         el.onclick = () => openDetail(el.dataset.id)
       })
+      list.querySelectorAll('.job-stop').forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation()
+          const id = btn.dataset.id
+          const title = btn.dataset.title || id
+          if (!confirm(`"${title}"\n\n진행 중인 이 작업을 중지할까요?`)) return
+          btn.disabled = true
+          btn.textContent = '중지 중…'
+          try {
+            await api('/api/jobs/' + id + '/cancel', { method: 'POST' })
+            await refresh()
+          } catch (err) {
+            alert('중지 실패: ' + err.message)
+            btn.disabled = false
+            btn.textContent = '⏹ 중지'
+          }
+        }
+      })
       list.querySelectorAll('.job-delete').forEach((btn) => {
         btn.onclick = async (e) => {
           e.stopPropagation()
@@ -304,9 +322,11 @@
     }
   }
 
+  const TERMINAL = ['done', 'failed', 'cancelled']
   function renderJob(j) {
     const pct = Math.round(j.progress * 100)
-    const canDelete = j.status === 'done' || j.status === 'failed'
+    const isActive = !TERMINAL.includes(j.status)
+    const canDelete = TERMINAL.includes(j.status)
     const titleAttr = (j.title || j.url).replace(/"/g, '&quot;')
     return `<li class="job">
       <div class="row">
@@ -314,11 +334,12 @@
           <strong>${escape(j.title || j.url)}</strong>
         </div>
         <span class="badge st-${j.status}">${j.status}</span>
+        ${isActive ? `<button class="job-stop" data-id="${j.id}" data-title="${titleAttr}" title="중지" type="button">⏹ 중지</button>` : ''}
         ${canDelete ? `<button class="job-delete" data-id="${j.id}" data-title="${titleAttr}" title="삭제" type="button">🗑</button>` : ''}
       </div>
       <div data-id="${j.id}" style="cursor:pointer">
         <div class="meta">${escape(j.url)}</div>
-        ${j.status !== 'done' && j.status !== 'failed'
+        ${isActive
           ? `<div class="bar"><div style="width:${pct}%"></div></div>`
           : ''}
         ${j.message ? `<div class="meta">${escape(j.message)}</div>` : ''}
@@ -331,6 +352,27 @@
     const dlg = $('#detail')
     $('#dTitle').textContent = j.title || j.url
     $('#dMeta').textContent = `${j.status} · ${Math.round(j.progress * 100)}% · Gemini ${j.quality}`
+    const dMsg = $('#dMessage')
+    if (j.message) { dMsg.textContent = '💬 ' + j.message; dMsg.hidden = false } else { dMsg.hidden = true }
+    const dStop = $('#dStop')
+    if (!TERMINAL.includes(j.status)) {
+      dStop.hidden = false
+      dStop.disabled = false
+      dStop.textContent = '⏹ 이 작업 중지'
+      dStop.onclick = async () => {
+        if (!confirm('진행 중인 이 작업을 중지할까요?')) return
+        dStop.disabled = true; dStop.textContent = '중지 중…'
+        try {
+          await api('/api/jobs/' + id + '/cancel', { method: 'POST' })
+          $('#detail').close(); await refresh()
+        } catch (err) {
+          alert('중지 실패: ' + err.message)
+          dStop.disabled = false; dStop.textContent = '⏹ 이 작업 중지'
+        }
+      }
+    } else {
+      dStop.hidden = true
+    }
     $('#dChapters').innerHTML = j.chapters.map(c =>
       `<li><code>${c.time}</code> <b>${escape(c.title)}</b>${c.summary ? ' — ' + escape(c.summary) : ''}</li>`).join('')
     $('#dArtifacts').innerHTML = j.artifacts
@@ -562,11 +604,15 @@
   .job-delete { background:transparent; border:1px solid #fca5a5; color:#dc2626; padding:4px 8px; border-radius:6px; font-size:13px; cursor:pointer; flex-shrink:0 }
   .job-delete:hover { background:#fee2e2 }
   .job-delete:disabled { opacity:0.5; cursor:wait }
+  .job-stop { background:transparent; border:1px solid #fdba74; color:#c2410c; padding:4px 8px; border-radius:6px; font-size:13px; cursor:pointer; flex-shrink:0 }
+  .job-stop:hover { background:#ffedd5 }
+  .job-stop:disabled { opacity:0.5; cursor:wait }
   .row { display:flex; justify-content:space-between; align-items:center; gap:8px }
   .meta { color:#64748b; font-size:12px; word-break:break-all }
   .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:#e2e8f0 }
   .st-done { background:#d1fae5; color:#065f46 } .st-failed { background:#fee2e2; color:#991b1b }
   .st-downloading { background:#dbeafe; color:#1e40af } .st-generating { background:#ede9fe; color:#5b21b6 }
+  .st-cancelled { background:#fef3c7; color:#92400e }
   .st-pending { background:#fef3c7; color:#92400e } .st-transcribing { background:#e0e7ff; color:#3730a3 }
   .bar { height:6px; background:#e2e8f0; border-radius:999px; margin-top:6px; overflow:hidden }
   .bar > div { height:100%; background:#0f172a; transition:width .3s }
@@ -832,6 +878,8 @@
 <dialog id="detail">
   <div class="row"><strong id="dTitle"></strong><button id="dClose" class="icon">닫기</button></div>
   <div id="dMeta" class="meta" style="margin:8px 0"></div>
+  <div id="dMessage" class="meta" style="margin:8px 0" hidden></div>
+  <button id="dStop" class="job-stop" style="margin:0 0 8px" type="button" hidden>⏹ 이 작업 중지</button>
   <h3 style="font-size:14px">📚 시계열 목차</h3>
   <ul id="dChapters"></ul>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">

@@ -59,6 +59,8 @@ def set_download_dir(new_path: str) -> Path:
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-2.5-flash")
 PRO_GEMINI_MODEL = os.getenv("PRO_GEMINI_MODEL", "gemini-2.5-pro")
+# Gemini 호출당 타임아웃(초). 초과 시 예외 → 작업이 60%에서 무한 대기하지 않음.
+GEMINI_TIMEOUT_SEC = int(os.getenv("GEMINI_TIMEOUT_SEC", "120"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
