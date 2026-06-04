@@ -311,7 +311,6 @@ ${inner}
       items: urls.map((u, i) => ({ label: `영상 ${i + 1}`, msg: '대기 중', state: 'wait', url: u, jobId: null })),
     }
     saveRun()
-    $('#clearRunBtn').hidden = false
     setStatus(`🚀 ${urls.length}개 영상 분석을 시작합니다. 영상 길이에 따라 수 분 걸릴 수 있어요.`)
     await processRun()
   }
@@ -327,7 +326,6 @@ ${inner}
     const qsel = $('#quality'); if (qsel && saved.quality) qsel.value = saved.quality
     urlList.innerHTML = ''
     saved.items.forEach(it => addUrlRow(it.url))
-    $('#clearRunBtn').hidden = false
     const anyActive = saved.items.some(it => it.state !== 'done' && it.state !== 'fail')
     setStatus(anyActive
       ? '↩ 진행 중이던 블로그 생성을 이어받습니다… (다른 탭/페이지로 이동해도 백엔드에서 계속 처리됩니다)'
@@ -356,19 +354,26 @@ ${inner}
     window.open(URL.createObjectURL(blob), '_blank')
   }
 
-  // ─── 새로 시작(진행 상태 지우기) ───
-  $('#clearRunBtn').onclick = () => {
-    if (currentRun && currentRun.status === 'running'
-        && !confirm('진행 중인 표시를 지웁니다. (백엔드 작업 자체는 계속 처리됩니다) 계속할까요?')) return
+  // ─── 초기화: 모든 입력/진행/미리보기를 비우고 새 URL 입력 준비 ───
+  function resetStudio() {
     clearRun()
     combinedSections = []
+    combinedTitle = ''
     previewCard.hidden = true
     setProgress([])
-    $('#clearRunBtn').hidden = true
     urlList.innerHTML = ''
-    addUrlRow(); addUrlRow()
+    addUrlRow(); addUrlRow()   // 빈 입력칸 2개
     $('#blogTitle').value = ''
     setStatus('유튜브 URL을 추가하고 <strong>통합 블로그 생성</strong>을 누르세요. 여러 영상이 하나의 long blog로 합쳐집니다.')
+    const firstInput = urlList.querySelector('.url-input')
+    if (firstInput) firstInput.focus()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  $('#clearRunBtn').onclick = () => {
+    const hasContent = (currentRun && currentRun.items && currentRun.items.length)
+      || combinedSections.length > 0
+    if (hasContent && !confirm('현재 내용(진행/결과)을 모두 지우고 새로 시작할까요?\n(이미 시작된 백엔드 작업 자체는 계속 처리됩니다)')) return
+    resetStudio()
   }
 
   // ─── 시작 ───
@@ -422,8 +427,8 @@ ${inner}
   #statusBox { font-size:13px; color:#475569; line-height:1.5; flex:1 }
   #statusBox a { color:#7c3aed }
   .status-row { display:flex; gap:10px; align-items:flex-start; margin-top:12px }
-  #clearRunBtn { flex-shrink:0; font-size:12px; padding:6px 10px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#475569; cursor:pointer }
-  #clearRunBtn:hover { background:#f1f5f9 }
+  #clearRunBtn { flex-shrink:0; font-size:13px; font-weight:600; padding:7px 14px; border-radius:8px; border:1px solid #fca5a5; background:#fff; color:#dc2626; cursor:pointer }
+  #clearRunBtn:hover { background:#fee2e2 }
 
   #progressList { list-style:none; padding:0; margin:12px 0 0 }
   #progressList li { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; background:#f8fafc; margin-bottom:6px; font-size:13px }
@@ -510,7 +515,7 @@ ${inner}
 
     <div class="status-row">
       <div id="statusBox"></div>
-      <button id="clearRunBtn" type="button" hidden>🆕 새로 시작</button>
+      <button id="clearRunBtn" type="button">🔄 초기화</button>
     </div>
     <ul id="progressList"></ul>
   </div>
