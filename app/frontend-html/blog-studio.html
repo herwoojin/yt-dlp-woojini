@@ -139,6 +139,7 @@
       onTick(j)
       if (j.status === 'done') return j
       if (j.status === 'failed') throw new Error(j.error || j.message || '분석 실패')
+      if (j.status === 'cancelled') throw new Error(j.message || '중지됨')
       await new Promise(r => setTimeout(r, 3000))
     }
   }
@@ -154,6 +155,14 @@
 
   let combinedSections = []   // {title, url, jobId, body}
   let combinedTitle = ''
+
+  // ─── 진행 상태 보존 (페이지 이탈 후 돌아와도 이어받기) ───
+  // 무거운 HTML 본문은 저장하지 않고, jobId만 저장해 복귀 시 백엔드에서 다시 가져온다.
+  const RUN_KEY = 'ytdlp_blog_run'
+  let currentRun = null  // { title, quality, status:'running'|'done', items:[{label,msg,state,url,jobId}] }
+  const saveRun = () => { if (currentRun) try { localStorage.setItem(RUN_KEY, JSON.stringify(currentRun)) } catch (_) {} }
+  const clearRun = () => { currentRun = null; try { localStorage.removeItem(RUN_KEY) } catch (_) {} }
+  const loadRun = () => { try { return JSON.parse(localStorage.getItem(RUN_KEY) || 'null') } catch (_) { return null } }
 
   function buildCombinedHtml({ forDownload }) {
     const title = combinedTitle || '통합 블로그'
@@ -212,77 +221,119 @@ ${inner}
   const downloadBtn = $('#downloadBtn')
   const openTabBtn = $('#openTabBtn')
 
-  runBtn.onclick = async () => {
-    const urls = [...urlList.querySelectorAll('.url-input')]
-      .map(i => i.value.trim()).filter(Boolean)
-    if (urls.length === 0) { setStatus('⚠️ 유튜브 URL을 최소 1개 이상 입력하세요.'); return }
+  // 완료된 job 에서 blog_long.html 을 가져와 섹션으로 추가 (순서 유지)
+  async function addSectionFromJob(it, idx, doneJob) {
+    const job = doneJob || await api('/api/jobs/' + it.jobId)
+    const hasBlog = (job.artifacts || []).some(a => a.filename === 'blog_long.html')
+    if (!hasBlog) throw new Error('blog_long.html 산출물이 없습니다')
+    const fullHtml = await api(`/api/files/${it.jobId}/preview/blog_long.html`)
+    combinedSections.push({
+      title: job.title || it.label || `영상 ${idx + 1}`,
+      url: it.url,
+      jobId: it.jobId,
+      body: extractBody(fullHtml),
+    })
+  }
 
-    combinedTitle = $('#blogTitle').value.trim()
-    const quality = $('#quality').value
-    combinedSections = []
-    previewCard.hidden = true
-
+  // currentRun 을 끝까지 처리(신규 실행/복귀 이어받기 공용). 각 단계마다 saveRun() 으로 상태 보존.
+  async function processRun() {
+    const run = currentRun
+    if (!run) return
+    combinedTitle = run.title || ''
     runBtn.disabled = true
     runBtn.textContent = '⏳ 블로그 생성 중...'
     $('#studioCard').classList.add('loading-glow')
-
-    const items = urls.map((u, i) => ({ label: `영상 ${i + 1}`, msg: '대기 중', state: 'wait', url: u }))
-    setProgress(items)
-    setStatus(`🚀 ${urls.length}개 영상 분석을 시작합니다. 영상 길이에 따라 수 분 걸릴 수 있어요.`)
-
+    setProgress(run.items)
     try {
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i]
-        items[i].state = 'work'; items[i].msg = '작업 등록 중'; setProgress(items)
-
-        let job
-        try {
-          job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ url, quality }) })
-        } catch (err) {
-          items[i].state = 'fail'; items[i].msg = '등록 실패: ' + err.message; setProgress(items)
+      for (let i = 0; i < run.items.length; i++) {
+        const it = run.items[i]
+        if (it.state === 'fail') continue
+        if (it.state === 'done' && it.jobId) {
+          // 복귀: 이미 끝난 영상은 본문만 다시 받아 섹션 복원
+          if (!combinedSections.some(s => s.jobId === it.jobId)) {
+            try { await addSectionFromJob(it, i) }
+            catch (err) { it.state = 'fail'; it.msg = '복원 실패: ' + err.message; saveRun() }
+          }
+          setProgress(run.items)
           continue
         }
-
+        // 진행/대기 영상: jobId 있으면 이어서 polling, 없으면 새로 등록
+        it.state = 'work'; saveRun()
         try {
-          const done = await waitForJob(job.id, (j) => {
+          if (!it.jobId) {
+            it.msg = '작업 등록 중'; setProgress(run.items)
+            const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ url: it.url, quality: run.quality }) })
+            it.jobId = job.id; saveRun()
+          }
+          const done = await waitForJob(it.jobId, (j) => {
             const pct = Math.round((j.progress || 0) * 100)
             const map = { pending: '대기', downloading: '다운로드', transcribing: '자막 분석', generating: 'AI 생성' }
-            items[i].msg = `${map[j.status] || j.status} ${pct}%`
-            if (j.title) items[i].label = j.title.slice(0, 40)
-            setProgress(items)
+            it.msg = `${map[j.status] || j.status} ${pct}%`
+            if (j.title) it.label = j.title.slice(0, 40)
+            setProgress(run.items); saveRun()
           })
-
-          // blog_long.html 가져오기
-          const hasBlog = (done.artifacts || []).some(a => a.filename === 'blog_long.html')
-          if (!hasBlog) throw new Error('blog_long.html 산출물이 없습니다')
-          const fullHtml = await api(`/api/files/${done.id}/preview/blog_long.html`)
-          combinedSections.push({
-            title: done.title || `영상 ${i + 1}`,
-            url,
-            jobId: done.id,
-            body: extractBody(fullHtml),
-          })
-          items[i].state = 'done'; items[i].msg = '완료 ✅'; setProgress(items)
+          await addSectionFromJob(it, i, done)
+          it.state = 'done'; it.msg = '완료 ✅'; setProgress(run.items); saveRun()
         } catch (err) {
-          items[i].state = 'fail'; items[i].msg = err.message; setProgress(items)
+          it.state = 'fail'; it.msg = err.message; setProgress(run.items); saveRun()
         }
       }
 
       if (combinedSections.length === 0) {
         setStatus('❌ 생성된 블로그가 없습니다. URL/연결/Gemini 키를 확인하세요.')
+        run.status = 'done'; saveRun()
         return
       }
-
-      // 미리보기 렌더링 (iframe srcdoc)
       previewFrame.srcdoc = buildCombinedHtml({ forDownload: true })
       previewCard.hidden = false
       setStatus(`🎉 완료! ${combinedSections.length}개 영상이 하나의 블로그로 합쳐졌습니다.`)
+      run.status = 'done'; saveRun()
       previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' })
     } finally {
       $('#studioCard').classList.remove('loading-glow')
       runBtn.disabled = false
       runBtn.textContent = '📚 통합 블로그 생성'
     }
+  }
+
+  runBtn.onclick = async () => {
+    const urls = [...urlList.querySelectorAll('.url-input')]
+      .map(i => i.value.trim()).filter(Boolean)
+    if (urls.length === 0) { setStatus('⚠️ 유튜브 URL을 최소 1개 이상 입력하세요.'); return }
+
+    combinedTitle = $('#blogTitle').value.trim()
+    combinedSections = []
+    previewCard.hidden = true
+    currentRun = {
+      title: combinedTitle,
+      quality: $('#quality').value,
+      status: 'running',
+      items: urls.map((u, i) => ({ label: `영상 ${i + 1}`, msg: '대기 중', state: 'wait', url: u, jobId: null })),
+    }
+    saveRun()
+    $('#clearRunBtn').hidden = false
+    setStatus(`🚀 ${urls.length}개 영상 분석을 시작합니다. 영상 길이에 따라 수 분 걸릴 수 있어요.`)
+    await processRun()
+  }
+
+  // 복귀 시 저장된 진행 상태 이어받기
+  async function maybeResumeRun() {
+    const saved = loadRun()
+    if (!saved || !Array.isArray(saved.items) || saved.items.length === 0) return false
+    currentRun = saved
+    combinedSections = []
+    combinedTitle = saved.title || ''
+    $('#blogTitle').value = saved.title || ''
+    const qsel = $('#quality'); if (qsel && saved.quality) qsel.value = saved.quality
+    urlList.innerHTML = ''
+    saved.items.forEach(it => addUrlRow(it.url))
+    $('#clearRunBtn').hidden = false
+    const anyActive = saved.items.some(it => it.state !== 'done' && it.state !== 'fail')
+    setStatus(anyActive
+      ? '↩ 진행 중이던 블로그 생성을 이어받습니다… (다른 탭/페이지로 이동해도 백엔드에서 계속 처리됩니다)'
+      : '↩ 이전에 만든 통합 블로그를 복원합니다…')
+    await processRun()
+    return true
   }
 
   // 다운로드 (단일 .html)
@@ -305,14 +356,33 @@ ${inner}
     window.open(URL.createObjectURL(blob), '_blank')
   }
 
-  // ─── 시작 ───
-  if (!isUnlocked()) {
-    // index.html 에서 잠금 해제 후 사용하도록 유도
-    setStatus('🔒 먼저 <a href="/index.html">메인 페이지</a>에서 잠금을 해제한 뒤 이용하세요.')
-  } else {
+  // ─── 새로 시작(진행 상태 지우기) ───
+  $('#clearRunBtn').onclick = () => {
+    if (currentRun && currentRun.status === 'running'
+        && !confirm('진행 중인 표시를 지웁니다. (백엔드 작업 자체는 계속 처리됩니다) 계속할까요?')) return
+    clearRun()
+    combinedSections = []
+    previewCard.hidden = true
+    setProgress([])
+    $('#clearRunBtn').hidden = true
+    urlList.innerHTML = ''
+    addUrlRow(); addUrlRow()
+    $('#blogTitle').value = ''
     setStatus('유튜브 URL을 추가하고 <strong>통합 블로그 생성</strong>을 누르세요. 여러 영상이 하나의 long blog로 합쳐집니다.')
   }
-  ensureBase()
+
+  // ─── 시작 ───
+  ;(async () => {
+    await ensureBase()
+    if (!isUnlocked()) {
+      setStatus('🔒 먼저 <a href="/index.html">메인 페이지</a>에서 잠금을 해제한 뒤 이용하세요.')
+      return
+    }
+    const resumed = await maybeResumeRun()
+    if (!resumed) {
+      setStatus('유튜브 URL을 추가하고 <strong>통합 블로그 생성</strong>을 누르세요. 여러 영상이 하나의 long blog로 합쳐집니다.')
+    }
+  })()
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {})
   }
@@ -349,8 +419,11 @@ ${inner}
   .run-btn:hover { background:#6d28d9 }
   .run-btn:disabled { opacity:.7; cursor:wait }
 
-  #statusBox { font-size:13px; color:#475569; margin-top:12px; line-height:1.5 }
+  #statusBox { font-size:13px; color:#475569; line-height:1.5; flex:1 }
   #statusBox a { color:#7c3aed }
+  .status-row { display:flex; gap:10px; align-items:flex-start; margin-top:12px }
+  #clearRunBtn { flex-shrink:0; font-size:12px; padding:6px 10px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#475569; cursor:pointer }
+  #clearRunBtn:hover { background:#f1f5f9 }
 
   #progressList { list-style:none; padding:0; margin:12px 0 0 }
   #progressList li { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; background:#f8fafc; margin-bottom:6px; font-size:13px }
@@ -435,7 +508,10 @@ ${inner}
       <button class="run-btn" id="runBtn" type="button">📚 통합 블로그 생성</button>
     </div>
 
-    <div id="statusBox"></div>
+    <div class="status-row">
+      <div id="statusBox"></div>
+      <button id="clearRunBtn" type="button" hidden>🆕 새로 시작</button>
+    </div>
     <ul id="progressList"></ul>
   </div>
 
