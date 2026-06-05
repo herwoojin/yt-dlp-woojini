@@ -47,8 +47,9 @@ def _model(quality: str) -> str:
 
 def _is_transient(err: Exception) -> bool:
     m = str(err).lower()
-    # 일일 한도(RPD)는 재시도해도 소용없음 → 빠르게 포기
-    if any(s in m for s in ("per day", "perday", "/day", "daily limit", "requests per day")):
+    # 일일 한도(RPD)·결제 크레딧 소진은 재시도해도 소용없음 → 빠르게 포기
+    if any(s in m for s in ("per day", "perday", "/day", "daily limit", "requests per day",
+                            "prepay", "credit", "billing")):
         return False
     return any(s in m for s in (
         "429", "quota", "rate", "resource_exhausted",

@@ -333,10 +333,15 @@ class JobRegistry:
             if "timeout" in low or "deadline" in low or "timed out" in low:
                 hint = (f"Gemini 응답 시간 초과({config.GEMINI_TIMEOUT_SEC}초). "
                         "네트워크 지연/모델 과부하이거나 자막이 너무 길 수 있습니다.")
+            elif "prepay" in low or "credit" in low or "billing" in low:
+                hint = ("Gemini API 결제 크레딧이 소진되었습니다. AI Studio(ai.studio/projects)에서 "
+                        "크레딧을 충전하세요. 임시로는 Flash가 단가가 훨씬 낮습니다.")
+            elif "per day" in low or "daily" in low or "requests per day" in low:
+                hint = "Gemini API 일일 한도를 초과했습니다. 내일 다시 시도하거나 결제 등급을 확인하세요."
             elif "api key" in low or "permission" in low or "401" in low or "403" in low:
                 hint = "Gemini API 키가 유효하지 않거나 권한이 없습니다. 설정에서 키를 확인하세요."
             elif "429" in low or "quota" in low or "rate" in low:
-                hint = "Gemini API 사용량/쿼터 한도에 걸렸습니다. 잠시 후 다시 시도하세요."
+                hint = "Gemini API 분당 한도(RPM)에 걸렸습니다. 잠시 후 다시 시도하세요."
             else:
                 hint = f"Gemini 단계 실패: {reason[:200]}"
             log.warning("gemini step failed (non-fatal): %s", exc)
