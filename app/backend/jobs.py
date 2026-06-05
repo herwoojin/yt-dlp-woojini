@@ -67,6 +67,43 @@ class JobRegistry:
     def is_cancelled(self, job_id: str) -> bool:
         return job_id in self._cancelled
 
+    def _disk_percent(self) -> float:
+        try:
+            u = shutil.disk_usage(config.get_download_dir())
+            return u.used / u.total * 100.0
+        except Exception:
+            return 0.0
+
+    async def _evict_job(self, job_id: str) -> None:
+        """레지스트리 + 디스크에서 작업을 조용히 제거(자동 정리 전용)."""
+        async with self._lock:
+            self._jobs.pop(job_id, None)
+            self._api_keys.pop(job_id, None)
+            self._cancelled.discard(job_id)
+        jdir = config.get_download_dir() / job_id
+        if jdir.exists():
+            shutil.rmtree(jdir, ignore_errors=True)
+
+    async def free_space_if_needed(self, protect_job_id: str | None = None) -> None:
+        """디스크 사용률이 높으면 오래된 작업부터 자동 삭제해 공간을 확보한다.
+        최근 DISK_KEEP_RECENT개와 진행 중/보호 대상 작업은 삭제하지 않는다."""
+        pct = self._disk_percent()
+        if pct < config.DISK_HIGH_PERCENT:
+            return
+        log.warning("disk %.0f%% ≥ %.0f%% — 오래된 작업 자동 정리 시작",
+                    pct, config.DISK_HIGH_PERCENT)
+        ordered = sorted(self._jobs.values(), key=lambda j: j.created_at)  # 오래된 순
+        keep = max(0, config.DISK_KEEP_RECENT)
+        deletable = ordered[:-keep] if keep and len(ordered) > keep else ordered
+        for job in deletable:
+            if job.id == protect_job_id or job.status in self._ACTIVE:
+                continue
+            await self._evict_job(job.id)
+            pct = self._disk_percent()
+            log.warning("  ↳ 오래된 작업 %s 자동 삭제 → 디스크 %.0f%%", job.id, pct)
+            if pct < config.DISK_TARGET_PERCENT:
+                break
+
     async def request_cancel(self, job_id: str) -> bool:
         """진행 중인 작업에 중지 플래그를 세우고 즉시 CANCELLED로 표시한다.
         이미 끝난(완료/실패/취소) 작업이면 False."""
@@ -189,6 +226,9 @@ class JobRegistry:
     async def _run_job(self, job_id: str, gemini_api_key: str | None = None) -> None:
         job = self._jobs[job_id]
         jdir = storage.job_dir(job_id)
+
+        # 0) 영상 다운로드 전에 디스크 자동 확보(오래된 작업부터 삭제)
+        await self.free_space_if_needed(protect_job_id=job_id)
 
         # 1) download
         if self.is_cancelled(job_id):

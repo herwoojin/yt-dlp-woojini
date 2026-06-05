@@ -62,6 +62,12 @@ PRO_GEMINI_MODEL = os.getenv("PRO_GEMINI_MODEL", "gemini-2.5-pro")
 # Gemini 호출당 타임아웃(초). 초과 시 예외 → 작업이 60%에서 무한 대기하지 않음.
 GEMINI_TIMEOUT_SEC = int(os.getenv("GEMINI_TIMEOUT_SEC", "120"))
 
+# 디스크 자동 정리: 사용률이 HIGH% 이상이면 영상 다운로드 전에 오래된 작업부터
+# TARGET% 아래까지 삭제한다(최근 KEEP개와 진행 중 작업은 항상 보존).
+DISK_HIGH_PERCENT = float(os.getenv("DISK_HIGH_PERCENT", "80"))
+DISK_TARGET_PERCENT = float(os.getenv("DISK_TARGET_PERCENT", "55"))
+DISK_KEEP_RECENT = int(os.getenv("DISK_KEEP_RECENT", "5"))
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
