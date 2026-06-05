@@ -57,6 +57,7 @@ class JobRegistry:
         self._queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
         self._api_keys: dict[str, str] = {}  # job_id -> gemini api key (메모리 only)
         self._cancelled: set[str] = set()  # 사용자가 중지 요청한 job_id
+        self._running_job_id: str | None = None  # 워커가 현재 처리 중인 작업
         self._lock = asyncio.Lock()
         self._worker_task: asyncio.Task | None = None
         self._load_from_disk()
@@ -151,6 +152,9 @@ class JobRegistry:
                               JobStatus.TRANSCRIBING, JobStatus.GENERATING):
                 # 진행 중 삭제는 worker와 race condition이 위험하므로 거부
                 raise RuntimeError("진행 중인 작업은 삭제할 수 없습니다 (완료/실패 후 삭제하세요)")
+            if job_id == self._running_job_id:
+                # 워커가 실제로 처리 중인 작업(취소됐어도)은 삭제 금지 — 디렉터리 race 방지
+                raise RuntimeError("처리 중인 작업이라 잠시 후 삭제하세요")
             jdir = storage.job_dir(job_id)
             if jdir.exists():
                 shutil.rmtree(jdir, ignore_errors=True)
@@ -189,9 +193,11 @@ class JobRegistry:
         jdir = storage.job_dir(job.id)
         (jdir / "job.json").write_text(job.model_dump_json(indent=2), encoding="utf-8")
 
-    async def _update(self, job_id: str, **fields) -> JobInfo:
+    async def _update(self, job_id: str, **fields) -> JobInfo | None:
         async with self._lock:
-            job = self._jobs[job_id]
+            job = self._jobs.get(job_id)
+            if job is None:  # 처리 도중 삭제된 작업 — 조용히 무시(워커가 죽지 않도록)
+                return None
             # 중지된 작업은 진행 중이던 단계가 뒤늦게 끝나도 되살아나지 않게 한다.
             # (CANCELLED/FAILED 같은 종료 상태로의 갱신만 허용)
             if job_id in self._cancelled and fields.get("status") not in (
@@ -209,22 +215,48 @@ class JobRegistry:
     async def start_worker(self) -> None:
         if self._worker_task is None:
             self._worker_task = asyncio.create_task(self._worker_loop())
+        # 재시작으로 큐가 비워지면 pending/중단된 작업이 영원히 멈춘다 → 다시 큐에 넣는다.
+        await self._requeue_orphans()
+
+    async def _requeue_orphans(self) -> None:
+        """서버 시작 시, 큐에 없는 미완료 작업(pending/중단된 진행 중)을 다시 큐에 넣는다.
+        Gemini 키는 메모리에만 있어 재시작 시 사라지므로 서버 키로 처리된다."""
+        for job in list(self._jobs.values()):
+            if job.status == JobStatus.PENDING:
+                await self._queue.put((job.id, None))
+            elif job.status in (JobStatus.DOWNLOADING, JobStatus.TRANSCRIBING, JobStatus.GENERATING):
+                await self._update(job.id, status=JobStatus.PENDING, progress=0.0,
+                                   message="서버 재시작 후 다시 대기 중")
+                await self._queue.put((job.id, None))
 
     async def _worker_loop(self) -> None:
+        # 이 루프는 어떤 일이 있어도 죽으면 안 된다(죽으면 이후 모든 작업이 pending에서 멈춤).
         while True:
-            job_id, gemini_api_key = await self._queue.get()
+            try:
+                job_id, gemini_api_key = await self._queue.get()
+            except Exception:
+                log.exception("queue.get 실패 — 1초 후 재시도")
+                await asyncio.sleep(1)
+                continue
+            self._running_job_id = job_id
             try:
                 await self._run_job(job_id, gemini_api_key=gemini_api_key)
             except Exception:
                 log.exception("worker failed for job %s", job_id)
-                await self._update(job_id, status=JobStatus.FAILED, error=traceback.format_exc())
+                try:
+                    await self._update(job_id, status=JobStatus.FAILED, error=traceback.format_exc())
+                except Exception:
+                    log.exception("작업 실패 표시도 실패(이미 삭제됐을 수 있음) %s", job_id)
             finally:
+                self._running_job_id = None
                 self._api_keys.pop(job_id, None)  # 사용 후 메모리에서 삭제
                 self._cancelled.discard(job_id)
                 self._queue.task_done()
 
     async def _run_job(self, job_id: str, gemini_api_key: str | None = None) -> None:
-        job = self._jobs[job_id]
+        job = self._jobs.get(job_id)
+        if job is None:  # 큐에 있던 사이 삭제됨
+            return
         jdir = storage.job_dir(job_id)
 
         # 0) 영상 다운로드 전에 디스크 자동 확보(오래된 작업부터 삭제)
