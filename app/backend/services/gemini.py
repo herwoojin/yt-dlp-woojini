@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -44,10 +45,35 @@ def _model(quality: str) -> str:
     return config.PRO_GEMINI_MODEL if quality == "pro" else config.DEFAULT_GEMINI_MODEL
 
 
+def _is_transient(err: Exception) -> bool:
+    m = str(err).lower()
+    # 일일 한도(RPD)는 재시도해도 소용없음 → 빠르게 포기
+    if any(s in m for s in ("per day", "perday", "/day", "daily limit", "requests per day")):
+        return False
+    return any(s in m for s in (
+        "429", "quota", "rate", "resource_exhausted",
+        "503", "overloaded", "unavailable", "500", "internal",
+    ))
+
+
 def _call(prompt: str, quality: str, api_key: str | None = None) -> str:
     client = _get_client(api_key)
-    resp = client.models.generate_content(model=_model(quality), contents=prompt)
-    return (resp.text or "").strip()
+    model = _model(quality)
+    last: Exception | None = None
+    for attempt in range(config.GEMINI_MAX_RETRIES + 1):
+        try:
+            resp = client.models.generate_content(model=model, contents=prompt)
+            return (resp.text or "").strip()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt < config.GEMINI_MAX_RETRIES and _is_transient(e):
+                delay = config.GEMINI_RETRY_BASE_SEC * (attempt + 1)
+                log.warning("gemini %s 일시 한도/오류 → %d초 후 재시도 (%d/%d): %s",
+                            model, delay, attempt + 1, config.GEMINI_MAX_RETRIES, str(e)[:120])
+                time.sleep(delay)
+                continue
+            raise
+    raise last  # pragma: no cover
 
 
 def _read_timed(transcript_text: str, max_chars: int = 60_000) -> str:

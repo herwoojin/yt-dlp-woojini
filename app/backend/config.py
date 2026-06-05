@@ -61,6 +61,9 @@ DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-2.5-flash")
 PRO_GEMINI_MODEL = os.getenv("PRO_GEMINI_MODEL", "gemini-2.5-pro")
 # Gemini 호출당 타임아웃(초). 초과 시 예외 → 작업이 60%에서 무한 대기하지 않음.
 GEMINI_TIMEOUT_SEC = int(os.getenv("GEMINI_TIMEOUT_SEC", "120"))
+# Gemini 429(쿼터/RPM)·5xx 일시 오류 시 백오프 재시도. 무료 등급 분당 한도 대응.
+GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "4"))
+GEMINI_RETRY_BASE_SEC = int(os.getenv("GEMINI_RETRY_BASE_SEC", "15"))
 
 # 디스크 자동 정리: 사용률이 HIGH% 이상이면 영상 다운로드 전에 오래된 작업부터
 # TARGET% 아래까지 삭제한다(최근 KEEP개와 진행 중 작업은 항상 보존).
