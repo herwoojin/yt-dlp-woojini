@@ -57,9 +57,16 @@ def _is_transient(err: Exception) -> bool:
     ))
 
 
-def _call(prompt: str, quality: str, api_key: str | None = None) -> str:
-    client = _get_client(api_key)
-    model = _model(quality)
+def _is_quota_like(err: Exception) -> bool:
+    """쿼터/한도/크레딧 소진 계열 오류인지(폴백 대상)."""
+    m = str(err).lower()
+    return any(s in m for s in (
+        "429", "quota", "resource_exhausted", "rate",
+        "prepay", "credit", "billing", "per day", "daily",
+    ))
+
+
+def _generate_with_retry(client: genai.Client, model: str, prompt: str) -> str:
     last: Exception | None = None
     for attempt in range(config.GEMINI_MAX_RETRIES + 1):
         try:
@@ -75,6 +82,20 @@ def _call(prompt: str, quality: str, api_key: str | None = None) -> str:
                 continue
             raise
     raise last  # pragma: no cover
+
+
+def _call(prompt: str, quality: str, api_key: str | None = None) -> str:
+    client = _get_client(api_key)
+    model = _model(quality)
+    try:
+        return _generate_with_retry(client, model, prompt)
+    except Exception as e:  # noqa: BLE001
+        # Pro가 쿼터/크레딧 소진으로 실패하면 Flash로 폴백 → 결과물(blog_long 등)은 무조건 나오게.
+        flash = config.DEFAULT_GEMINI_MODEL
+        if model != flash and _is_quota_like(e):
+            log.warning("Pro(%s) 쿼터/크레딧 실패 → Flash(%s) 폴백: %s", model, flash, str(e)[:120])
+            return _generate_with_retry(client, flash, prompt)
+        raise
 
 
 def _read_timed(transcript_text: str, max_chars: int = 60_000) -> str:
