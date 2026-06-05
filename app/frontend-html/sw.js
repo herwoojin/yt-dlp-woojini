@@ -1,6 +1,6 @@
 // 최소 service worker: PWA install 자격 충족 + 정적 셸 캐시.
 // API 응답은 캐시하지 않음 (job 상태가 실시간이라야 함).
-const CACHE = 'ytdlp-shell-v7';
+const CACHE = 'ytdlp-shell-v8';
 const SHELL = ['/', '/index.html', '/blog-studio.html', '/reference-images.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
@@ -17,6 +17,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // http(s)가 아닌 요청(chrome-extension:// 등)은 캐시 불가 → 건너뜀
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   // API/터널 호출은 네트워크 우선 (캐시 안 함)
   if (url.pathname.startsWith('/api/') || url.hostname.endsWith('.fly.dev') || url.hostname.endsWith('.trycloudflare.com')) {
     return;

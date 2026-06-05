@@ -15,6 +15,7 @@
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
   const GEMINI_KEY = cfg.gemini_key || ''
+  const FALLBACK_BASE = 'https://ytdlp-25y.fly.dev'  // 터널이 죽어도 항상 살아있는 영구 백엔드
   const GITHUB_RAW_TUNNEL = 'https://raw.githubusercontent.com/herwoojin/yt-dlp-woojini/master/app/frontend-html/tunnel.json'
 
   async function fetchTunnelJson(url) {
@@ -51,10 +52,24 @@
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
+      const tried = new Set([BASE])
+      const candidates = []
       const fresh = await discoverTunnelUrl()
-      if (fresh && fresh !== BASE) {
-        BASE = fresh
-        return await _parseResp(await fetch(BASE + path, { ...init, headers }))
+      if (fresh && !tried.has(fresh)) candidates.push(fresh)
+      if (!tried.has(FALLBACK_BASE)) candidates.push(FALLBACK_BASE)
+      for (const cand of candidates) {
+        if (tried.has(cand)) continue
+        tried.add(cand)
+        const attempts = cand === FALLBACK_BASE ? 2 : 1
+        for (let k = 0; k < attempts; k++) {
+          try {
+            const res = await _parseResp(await fetch(cand + path, { ...init, headers }))
+            BASE = cand
+            return res
+          } catch (_) {
+            if (k < attempts - 1) await new Promise(r => setTimeout(r, 1500))
+          }
+        }
       }
       throw err
     }

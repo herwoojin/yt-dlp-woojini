@@ -25,6 +25,8 @@
   let BASE = cfg.base || ''
   let BASE_SOURCE = 'localStorage'  // 'auto' | 'localStorage'
   const GEMINI_KEY = cfg.gemini_key || ''
+  // 터널(tunnel.json)이 죽어도 항상 살아있는 영구 백엔드. 최종 fallback.
+  const FALLBACK_BASE = 'https://ytdlp-25y.fly.dev'
 
   // tunnel.json은 cloudflared 재시작 시 자동 게시되는 현재 백엔드 URL이다.
   // - Netlify (/tunnel.json)는 최신 deploy의 정적 파일 → 리빌드 완료 후에만 최신값
@@ -113,13 +115,28 @@
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
-      // 어떤 source든 실패하면 tunnel.json/GitHub raw에서 다시 발견 후 1회 재시도
-      // (localStorage에 옛 URL이 박혀 있어도 자동 복구 가능하도록)
+      // 실패 시 후보 순서대로 시도: ① tunnel.json 자동발견 ② 고정 fly.dev fallback
+      // (localStorage/터널 URL이 죽어 있어도 자동 복구)
+      const tried = new Set([BASE])
+      const candidates = []
       const fresh = await discoverTunnelUrl()
-      if (fresh && fresh !== BASE) {
-        BASE = fresh
-        BASE_SOURCE = 'auto'
-        return await _parseResp(await fetch(BASE + path, { ...init, headers }))
+      if (fresh && !tried.has(fresh)) candidates.push(fresh)
+      if (!tried.has(FALLBACK_BASE)) candidates.push(FALLBACK_BASE)
+      for (const cand of candidates) {
+        if (tried.has(cand)) continue
+        tried.add(cand)
+        // fly.dev는 idle 후 cold start(~3초) 가능 → 한 번 더 재시도
+        const attempts = cand === FALLBACK_BASE ? 2 : 1
+        for (let k = 0; k < attempts; k++) {
+          try {
+            const res = await _parseResp(await fetch(cand + path, { ...init, headers }))
+            BASE = cand
+            BASE_SOURCE = 'auto'
+            return res
+          } catch (_) {
+            if (k < attempts - 1) await new Promise(r => setTimeout(r, 1500))
+          }
+        }
       }
       throw err
     }
