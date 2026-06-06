@@ -273,17 +273,25 @@ def extract_blog_image_timestamps(blog_html: str) -> list[dict]:
     return results
 
 
-def generate_all(job_dir: Path, title: str, quality: str, api_key: str | None = None) -> dict[str, Any]:
-    """Reads plain + timed transcripts from job_dir and produces all four outputs."""
+def generate_all(job_dir: Path, title: str, quality: str, api_key: str | None = None,
+                 wants: set[str] | None = None) -> dict[str, Any]:
+    """Reads plain + timed transcripts and produces outputs.
+    *wants* 가 None이면 전부 생성(하위호환). 집합이면 chapters/blog는 항상 생성하고
+    summary/email은 wants에 포함될 때만 생성(불필요한 Gemini 호출/크레딧 절약)."""
     plain_path = job_dir / "transcript.txt"
     timed_path = job_dir / "transcript_timed.txt"
     plain_text = plain_path.read_text(encoding="utf-8") if plain_path.exists() else ""
     timed_text = timed_path.read_text(encoding="utf-8") if timed_path.exists() else plain_text
 
-    chapters = generate_chapters(timed_text, title, quality, api_key=api_key)
-    summary_short = generate_short_summary_html(plain_text, title, quality, api_key=api_key)
-    email_html = generate_email_html(plain_text, title, chapters, quality, api_key=api_key)
-    blog_html = generate_blog_html(plain_text, title, chapters, quality, api_key=api_key)
+    def want(k: str) -> bool:
+        return wants is None or k in wants
+
+    chapters = generate_chapters(timed_text, title, quality, api_key=api_key)  # 블로그에 필요 → 항상
+    summary_short = (generate_short_summary_html(plain_text, title, quality, api_key=api_key)
+                     if want("summary") else None)
+    email_html = (generate_email_html(plain_text, title, chapters, quality, api_key=api_key)
+                  if want("email") else None)
+    blog_html = generate_blog_html(plain_text, title, chapters, quality, api_key=api_key)  # 항상
     blog_image_timestamps = extract_blog_image_timestamps(blog_html)
     return {
         "chapters": chapters,

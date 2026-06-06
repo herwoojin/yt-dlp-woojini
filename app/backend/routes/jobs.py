@@ -29,6 +29,7 @@ async def create_job(
         video_format=payload.video_format,
         owner_uid=user["uid"],
         gemini_api_key=api_key,
+        outputs=payload.outputs,
     )
     return job
 

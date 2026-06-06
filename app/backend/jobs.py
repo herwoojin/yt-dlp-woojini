@@ -169,6 +169,7 @@ class JobRegistry:
         video_format: str,
         owner_uid: str,
         gemini_api_key: str | None = None,
+        outputs: list[str] | None = None,
     ) -> JobInfo:
         job_id = uuid.uuid4().hex[:12]
         now = datetime.utcnow()
@@ -181,6 +182,7 @@ class JobRegistry:
             created_at=now,
             updated_at=now,
             owner_uid=owner_uid,
+            outputs=outputs,
         )
         self._jobs[job_id] = job
         if gemini_api_key:
@@ -319,6 +321,11 @@ class JobRegistry:
             message="Gemini로 목차/요약/HTML 생성 중",
             artifacts=artifacts,
         )
+        wants = set(job.outputs) if job.outputs is not None else None
+
+        def want(k: str) -> bool:
+            return wants is None or k in wants
+
         try:
             results = await asyncio.to_thread(
                 gemini.generate_all,
@@ -326,6 +333,7 @@ class JobRegistry:
                 info.get("title") or "",
                 job.quality,
                 api_key=gemini_api_key,
+                wants=wants,
             )
         except Exception as exc:
             reason = str(exc)
@@ -377,15 +385,41 @@ class JobRegistry:
         except Exception as exc:
             log.warning("screenshot step failed (non-fatal): %s", exc)
 
-        for fname, content in [
-            ("chapters.json", json.dumps(results["chapters"], ensure_ascii=False, indent=2)),
-            ("summary_short.html", _wrap_html(video_title + " — 요약", results["summary_short_html"])),
-            ("email_readable.html", _wrap_html(video_title + " — 이메일", results["email_html"])),
+        # blog_long은 항상 생성. chapters/summary/email은 선택 시에만 파일로 남김.
+        to_write: list[tuple[str, str]] = [
             ("blog_long.html", _wrap_html(video_title + " — 블로그", results["blog_html"])),
-        ]:
+        ]
+        if want("chapters"):
+            to_write.append(("chapters.json", json.dumps(results["chapters"], ensure_ascii=False, indent=2)))
+        if results.get("summary_short_html"):  # wants에 summary 포함됐을 때만 생성됨
+            to_write.append(("summary_short.html", _wrap_html(video_title + " — 요약", results["summary_short_html"])))
+        if results.get("email_html"):
+            to_write.append(("email_readable.html", _wrap_html(video_title + " — 이메일", results["email_html"])))
+        for fname, content in to_write:
             p = jdir / fname
             p.write_text(content, encoding="utf-8")
             artifacts.append(JobArtifact(kind=fname.split(".")[0], filename=fname, size_bytes=p.stat().st_size))
+
+        # 선택 안 한 산출물 정리: blog_long/blog_image는 항상 유지, info_json/subtitle은 항상 숨김,
+        # 나머지는 wants에 따라 목록에서 제외(큰 파일은 디스크에서도 삭제).
+        keymap = {"video": "video", "transcript_txt": "transcript", "screenshots_zip": "screenshots",
+                  "chapters": "chapters", "summary_short": "summary", "email_readable": "email"}
+
+        def _keep(a: JobArtifact) -> bool:
+            if a.kind in ("blog_long", "blog_image"):
+                return True
+            if a.kind in ("info_json", "subtitle"):
+                return False
+            key = keymap.get(a.kind)
+            return True if key is None else want(key)
+
+        for a in list(artifacts):
+            if not _keep(a) and a.kind in ("video", "screenshots_zip"):
+                try:
+                    (jdir / a.filename).unlink()
+                except OSError:
+                    pass
+        artifacts = [a for a in artifacts if _keep(a)]
 
         await self._update(
             job_id,

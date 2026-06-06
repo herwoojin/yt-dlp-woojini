@@ -191,15 +191,38 @@
     $('#cfgGeminiKey').focus()
   }
 
-  // ─── 작업 등록 ────────────────────────────────────
-  $('#form').onsubmit = async (e) => {
+  // ─── 작업 등록 (산출물 선택 → 확인 → 진행) ──────────────
+  const OUTPUTS_KEY = 'ytdlp_outputs'
+  let pendingSubmit = null
+  const outputsModal = $('#outputsModal')
+
+  function openOutputsModal() {
+    let saved = []
+    try { saved = JSON.parse(localStorage.getItem(OUTPUTS_KEY) || '[]') } catch (_) {}
+    outputsModal.querySelectorAll('input[data-out]').forEach(c => {
+      c.checked = saved.includes(c.dataset.out)
+    })
+    outputsModal.showModal()
+  }
+  const closeOutputs = () => outputsModal.close()
+
+  $('#form').onsubmit = (e) => {
     e.preventDefault()
     const url = $('#url').value.trim()
-    const quality = $('#quality').value
     if (!url) return
+    pendingSubmit = { url, quality: $('#quality').value }
+    openOutputsModal()
+  }
+  $('#outputsCancel').onclick = closeOutputs
+  $('#outputsConfirm').onclick = async () => {
+    const outputs = ['blog']  // 블로그 글 + 복사하기는 항상 필수
+    outputsModal.querySelectorAll('input[data-out]:checked').forEach(c => outputs.push(c.dataset.out))
+    localStorage.setItem(OUTPUTS_KEY, JSON.stringify(outputs.filter(o => o !== 'blog')))
+    closeOutputs()
+    if (!pendingSubmit) return
     status.textContent = '등록 중...'
     try {
-      const body = { url, quality }
+      const body = { url: pendingSubmit.url, quality: pendingSubmit.quality, outputs }
       if (GEMINI_KEY) body.gemini_api_key = GEMINI_KEY
       await api('/api/jobs', { method: 'POST', body: JSON.stringify(body) })
       $('#url').value = ''
@@ -208,6 +231,7 @@
     } catch (err) {
       status.textContent = '실패: ' + err.message
     }
+    pendingSubmit = null
   }
 
   // ─── 연결 상태 ────────────────────────────────────
@@ -720,6 +744,12 @@
   #dCopyBlog:hover { background:#6d28d9 }
   #dCopyBlog:disabled { opacity:.7; cursor:wait }
   .copy-hint { font-size:12px; color:#475569; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:8px; padding:8px 12px; line-height:1.5; margin-bottom:6px }
+  .out-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px }
+  .out-list li { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff }
+  .out-list li.out-required { background:#f5f3ff; border-color:#ddd6fe }
+  .out-list label { display:flex; align-items:center; gap:10px; font-size:14px; cursor:pointer; flex:1 }
+  .out-list input[type=checkbox] { width:18px; height:18px; accent-color:#7c3aed; cursor:pointer }
+  .out-list .out-tag { font-size:11px; font-weight:700; color:#6d28d9; background:#ede9fe; padding:2px 8px; border-radius:999px }
   .btn-secondary { padding:10px 20px; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer }
 
   /* API 키 경고 배너 */
@@ -949,6 +979,27 @@
 
   <ul id="jobs"></ul>
 </div>
+
+<!-- 산출물 선택 모달 -->
+<dialog id="outputsModal">
+  <div class="row"><strong>🎁 만들 산출물 선택</strong><button id="outputsCancel" class="icon" type="button">취소</button></div>
+  <p style="font-size:13px;color:#64748b;margin:8px 0 12px">필요한 것만 고르세요. 체크 안 한 항목은 만들지 않습니다 (Gemini 크레딧·디스크 절약).</p>
+  <ul class="out-list">
+    <li class="out-required">
+      <label><input type="checkbox" checked disabled> 📝 블로그 글(HTML) + 복사하기</label>
+      <span class="out-tag">필수</span>
+    </li>
+    <li><label><input type="checkbox" data-out="summary"> 📰 짧은 요약 (summary_short)</label></li>
+    <li><label><input type="checkbox" data-out="email"> ✉️ 이메일용 글 (email_readable)</label></li>
+    <li><label><input type="checkbox" data-out="chapters"> 📚 목차 파일 (chapters.json)</label></li>
+    <li><label><input type="checkbox" data-out="screenshots"> 📸 주요 장면 스크린샷 ZIP</label></li>
+    <li><label><input type="checkbox" data-out="transcript"> 📄 자막 텍스트 (transcript)</label></li>
+    <li><label><input type="checkbox" data-out="video"> 🎬 영상 파일 (video.mp4)</label></li>
+  </ul>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <button id="outputsConfirm" class="btn-primary" type="button">✅ 확인하고 시작</button>
+  </div>
+</dialog>
 
 <!-- 작업 상세 모달 -->
 <dialog id="detail">

@@ -32,6 +32,11 @@ class JobCreateRequest(BaseModel):
         default=None,
         description="사용자 본인의 Gemini API 키. 전달 시 서버 키 대신 사용.",
     )
+    outputs: list[str] | None = Field(
+        default=None,
+        description="생성할 산출물 키 목록(video,transcript,screenshots,chapters,summary,email). "
+                    "blog(블로그 long+복사)은 항상 생성. None이면 전부 생성(하위호환).",
+    )
 
 
 class JobArtifact(BaseModel):
@@ -53,6 +58,7 @@ class JobInfo(BaseModel):
     created_at: datetime
     updated_at: datetime
     owner_uid: str | None = None
+    outputs: list[str] | None = None
     artifacts: list[JobArtifact] = Field(default_factory=list)
     chapters: list[dict[str, Any]] = Field(default_factory=list)
     duration_seconds: int | None = None
