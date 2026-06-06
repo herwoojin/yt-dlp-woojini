@@ -68,6 +68,38 @@ class JobRegistry:
     def is_cancelled(self, job_id: str) -> bool:
         return job_id in self._cancelled
 
+    @staticmethod
+    def _filter_artifacts(
+        artifacts: list[JobArtifact],
+        outputs: list[str] | None,
+    ) -> list[JobArtifact]:
+        """사용자가 선택한 산출물만 남기는 필터.
+        blog_long/blog_image는 항상 유지, info_json/subtitle은 항상 숨김.
+        _update에서 자동 호출되어 모든 상태(진행 중 포함)에 일관 적용된다."""
+        _ALWAYS_KEEP = {"blog_long", "blog_image"}
+        _ALWAYS_HIDE = {"info_json", "subtitle"}
+        _KEYMAP = {
+            "video": "video",
+            "transcript_txt": "transcript",
+            "screenshots_zip": "screenshots",
+            "chapters": "chapters",
+            "summary_short": "summary",
+            "email_readable": "email",
+        }
+        if outputs is None:
+            return [a for a in artifacts if a.kind not in _ALWAYS_HIDE]
+        wants = set(outputs)
+
+        def _keep(a: JobArtifact) -> bool:
+            if a.kind in _ALWAYS_KEEP:
+                return True
+            if a.kind in _ALWAYS_HIDE:
+                return False
+            key = _KEYMAP.get(a.kind)
+            return True if key is None else key in wants
+
+        return [a for a in artifacts if _keep(a)]
+
     def _disk_percent(self) -> float:
         try:
             u = shutil.disk_usage(config.get_download_dir())
@@ -208,6 +240,9 @@ class JobRegistry:
                 return job
             data = job.model_dump()
             data.update(fields)
+            # 산출물 목록이 갱신될 때마다 사용자 선택에 맞게 필터링
+            if "artifacts" in fields:
+                data["artifacts"] = self._filter_artifacts(data["artifacts"], data.get("outputs"))
             data["updated_at"] = datetime.utcnow()
             new_job = JobInfo(**data)
             self._jobs[job_id] = new_job
@@ -400,26 +435,19 @@ class JobRegistry:
             p.write_text(content, encoding="utf-8")
             artifacts.append(JobArtifact(kind=fname.split(".")[0], filename=fname, size_bytes=p.stat().st_size))
 
-        # 선택 안 한 산출물 정리: blog_long/blog_image는 항상 유지, info_json/subtitle은 항상 숨김,
-        # 나머지는 wants에 따라 목록에서 제외(큰 파일은 디스크에서도 삭제).
-        keymap = {"video": "video", "transcript_txt": "transcript", "screenshots_zip": "screenshots",
-                  "chapters": "chapters", "summary_short": "summary", "email_readable": "email"}
-
-        def _keep(a: JobArtifact) -> bool:
-            if a.kind in ("blog_long", "blog_image"):
-                return True
-            if a.kind in ("info_json", "subtitle"):
-                return False
-            key = keymap.get(a.kind)
-            return True if key is None else want(key)
-
-        for a in list(artifacts):
-            if not _keep(a) and a.kind in ("video", "screenshots_zip"):
-                try:
-                    (jdir / a.filename).unlink()
-                except OSError:
-                    pass
-        artifacts = [a for a in artifacts if _keep(a)]
+        # 선택 안 한 대용량 산출물은 디스크에서도 삭제 (목록 필터링은 _update가 자동 처리)
+        if wants is not None:
+            for a in artifacts:
+                if a.kind == "video" and not want("video"):
+                    try:
+                        (jdir / a.filename).unlink()
+                    except OSError:
+                        pass
+                elif a.kind == "screenshots_zip" and not want("screenshots"):
+                    try:
+                        (jdir / a.filename).unlink()
+                    except OSError:
+                        pass
 
         await self._update(
             job_id,
