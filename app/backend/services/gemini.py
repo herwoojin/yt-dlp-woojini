@@ -191,6 +191,12 @@ def generate_blog_html(plain_text: str, title: str, chapters: list[dict], qualit
 - 도입(독자 hook) → 본문(챕터 기반 섹션 6~10개) → 결론/CTA
 - 각 섹션마다 소제목(h2), 본문 단락 2~4개, 필요시 불릿
 - 인라인 스타일, 가독성 좋은 폰트/크기/간격
+- 문맥과 맥락에 맞춰 단락을 자연스럽게 구분하세요(한 단락은 3~5문장 정도, 너무 길지 않게).
+- 글의 핵심이 되는 단어·문장은 문맥을 파악해 강조하세요(남발 금지, 한 단락당 1~2곳만):
+  · 핵심 키워드/숫자/고유명사: <strong style="color:#2563eb">텍스트</strong>  (굵게+파란색)
+  · 글에서 가장 중요한 핵심 문장/주장: <strong style="color:#c2410c"><u>문장</u></strong>  (굵게+주황색+밑줄)
+  · 보조 강조가 필요하면: <strong>텍스트</strong> 또는 <u>텍스트</u>
+  강조는 정말 중요한 부분에만 — 본문 전체가 강조로 도배되지 않게 절제하세요.
 - 각 주요 섹션(최소 3개, 최대 8개)에 영상 캡처 이미지를 삽입하세요:
   <figure style="margin:24px 0;text-align:center" data-timestamp="HH:MM:SS">
     <img src="blog_img_N.jpg" alt="이미지 설명" style="max-width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">

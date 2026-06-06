@@ -1,5 +1,5 @@
 {
-  "name": "[JINI+US]YOUTUBE분석기",
+  "name": "[JINI+US] 글로 보는 유튜브",
   "short_name": "JINI+US",
   "description": "유튜브 영상 다운로드 + Gemini 요약/목차/HTML 생성",
   "start_url": "/",
