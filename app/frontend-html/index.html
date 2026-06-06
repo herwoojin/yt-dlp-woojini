@@ -392,8 +392,23 @@
     }
     $('#dChapters').innerHTML = j.chapters.map(c =>
       `<li><code>${c.time}</code> <b>${escape(c.title)}</b>${c.summary ? ' — ' + escape(c.summary) : ''}</li>`).join('')
+    // blog_long HTML 복사 버튼 (Tistory 붙여넣기용) — blog_long 있을 때만
+    const blogArt = j.artifacts.find(a => a.kind === 'blog_long' || a.filename === 'blog_long.html')
+    const copyBtn = $('#dCopyBlog')
+    const copyHint = $('#dCopyHint')
+    copyHint.hidden = true
+    if (blogArt) {
+      copyBtn.hidden = false
+      copyBtn.disabled = false
+      copyBtn.textContent = '📋 블로그 HTML 복사 (Tistory HTML 모드 붙여넣기용)'
+      copyBtn.onclick = () => copyBlogHtml(j.id, blogArt.filename, copyBtn, copyHint)
+    } else {
+      copyBtn.hidden = true
+    }
+    // 안 보이게 할 산출물: blog_image(미리보기에 포함), info_json, subtitle
+    const HIDDEN_KINDS = new Set(['blog_image', 'info_json', 'subtitle'])
     $('#dArtifacts').innerHTML = j.artifacts
-      .filter(a => a.kind !== 'blog_image')  // blog images are shown in blog preview
+      .filter(a => !HIDDEN_KINDS.has(a.kind))
       .map(a => {
       const previewable = /\.(html?|json|txt|vtt|srt)$/i.test(a.filename)
       const isScreenshotZip = a.kind === 'screenshots_zip'
@@ -418,6 +433,46 @@
     dlg.showModal()
   }
   $('#dClose').onclick = () => $('#detail').close()
+
+  // blog_long.html을 가져와 body만 추출 + 이미지 경로를 절대주소로 바꿔 클립보드에 복사.
+  // → Tistory HTML 모드에 붙여넣으면 글과 사진이 그대로 들어간다.
+  async function copyBlogHtml(jobId, filename, btn, hint) {
+    btn.disabled = true
+    const orig = btn.textContent
+    btn.textContent = '⏳ 준비 중…'
+    try {
+      const full = await api(`/api/files/${jobId}/preview/${encodeURIComponent(filename)}`)
+      const text = typeof full === 'string' ? full : String(full)
+      const m = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
+      let html = (m ? m[1] : text)
+      // 상대 /api/ 경로 → 절대(백엔드) 경로: Tistory에서도 이미지가 로드되게
+      html = html.replace(/(src|href)=(["'])\/api\//g, `$1=$2${BASE}/api/`)
+      html = html.trim()
+      let copied = false
+      try {
+        await navigator.clipboard.writeText(html)
+        copied = true
+      } catch (_) {
+        // 클립보드 권한 실패 시 textarea fallback
+        const ta = document.createElement('textarea')
+        ta.value = html; ta.style.position = 'fixed'; ta.style.opacity = '0'
+        document.body.appendChild(ta); ta.select()
+        try { copied = document.execCommand('copy') } catch (_) {}
+        ta.remove()
+      }
+      btn.textContent = copied ? '✅ 복사됨!' : '⚠️ 복사 실패'
+      hint.hidden = false
+      hint.innerHTML = copied
+        ? 'Tistory 글쓰기 → 우측 상단 <b>HTML</b> 모드 → 붙여넣기(⌘V) → 다시 일반 모드로 전환하면 글+사진이 들어갑니다.<br><span style="opacity:.7">※ 이미지는 이 백엔드에서 제공되므로, 게시 후 너무 오래 지나면 끊길 수 있어 가급적 바로 발행하세요.</span>'
+        : '복사에 실패했습니다. 산출물의 blog_long.html을 <b>바로보기</b> 후 소스를 복사해 주세요.'
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false }, 2500)
+    } catch (err) {
+      btn.textContent = '⚠️ 가져오기 실패'
+      hint.hidden = false
+      hint.textContent = '블로그 HTML을 가져오지 못했습니다: ' + (err.message || err)
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false }, 2500)
+    }
+  }
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
@@ -661,6 +716,10 @@
   .btn-row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px }
   .btn-primary { padding:10px 20px; background:#059669; color:#fff; border:0; border-radius:8px; font-weight:600; cursor:pointer }
   .btn-primary:hover { background:#047857 }
+  #dCopyBlog { width:100%; margin:14px 0 6px; padding:12px; background:#7c3aed; color:#fff; border:0; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer }
+  #dCopyBlog:hover { background:#6d28d9 }
+  #dCopyBlog:disabled { opacity:.7; cursor:wait }
+  .copy-hint { font-size:12px; color:#475569; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:8px; padding:8px 12px; line-height:1.5; margin-bottom:6px }
   .btn-secondary { padding:10px 20px; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer }
 
   /* API 키 경고 배너 */
@@ -899,6 +958,8 @@
   <button id="dStop" class="job-stop" style="margin:0 0 8px" type="button" hidden>⏹ 이 작업 중지</button>
   <h3 style="font-size:14px">📚 시계열 목차</h3>
   <ul id="dChapters"></ul>
+  <button id="dCopyBlog" type="button" hidden>📋 블로그 HTML 복사 <span style="opacity:.8;font-weight:400">(Tistory HTML 모드 붙여넣기용)</span></button>
+  <div id="dCopyHint" class="copy-hint" hidden></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
     <h3 style="font-size:14px;margin:0">📦 산출물</h3>
     <a id="dDownloadAll" class="btn-primary" style="padding:6px 12px;font-size:12px;text-decoration:none;display:none" download>📦 전체 ZIP 다운로드</a>
