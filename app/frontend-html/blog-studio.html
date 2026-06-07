@@ -13,14 +13,14 @@
 <script type="module">
   // ── 멀티 영상 → 하나의 long blog 생성 스튜디오 (단일 HTML) ──
   // index.html 과 동일한 백엔드 연결 방식(tunnel.json 발견 + 사용자 설정)을 재사용한다.
-  import { getIdTokenOrNull } from './auth-client.js'
+  import { getIdTokenOrNull, getGeminiKey, setGeminiKey } from './auth-client.js'
 
   // ─── 사이트 잠금 상태 공유 (index.html 과 동일 키) ───
   const isUnlocked = () => sessionStorage.getItem('ytdlp_unlocked') === '1'
 
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
-  const GEMINI_KEY = cfg.gemini_key || ''
+  // Gemini 키는 로그인 사용자(uid)별 — getGeminiKey()로 매번 현재 키를 읽는다.
   const FALLBACK_BASE = 'https://ytdlp-25y.fly.dev'  // 터널이 죽어도 항상 살아있는 영구 백엔드
 
   const GITHUB_RAW_TUNNEL = 'https://raw.githubusercontent.com/herwoojin/yt-dlp-woojini/master/app/frontend-html/tunnel.json'
@@ -59,7 +59,8 @@
   }
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
-    if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    const _gk = getGeminiKey()
+    if (_gk) headers['X-Gemini-Key'] = _gk
     const _tok = await getIdTokenOrNull()
     if (_tok) headers['Authorization'] = 'Bearer ' + _tok
     try {
@@ -96,16 +97,13 @@
   const settingsModal = $('#settingsModal')
   $('#cfgBtn').onclick = () => {
     $('#cfgBase').value = BASE
-    $('#cfgGeminiKey').value = GEMINI_KEY
+    $('#cfgGeminiKey').value = getGeminiKey()
     settingsModal.showModal()
   }
   $('#cfgClose').onclick = () => settingsModal.close()
   $('#cfgSave').onclick = () => {
-    const newCfg = {
-      base: $('#cfgBase').value.trim().replace(/\/$/, ''),
-      gemini_key: $('#cfgGeminiKey').value.trim(),
-    }
-    localStorage.setItem('ytdlp_cfg', JSON.stringify(newCfg))
+    localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: $('#cfgBase').value.trim().replace(/\/$/, '') }))
+    setGeminiKey($('#cfgGeminiKey').value.trim())
     settingsModal.close()
     location.reload()
   }

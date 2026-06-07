@@ -14,7 +14,7 @@
 <script type="module">
   // yt-dlp webapp 프론트엔드 (단일 HTML)
   // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
-  import { loginWithGoogle, logout, onUser, currentUser, getIdTokenOrNull } from './auth-client.js'
+  import { loginWithGoogle, logout, onUser, currentUser, getIdTokenOrNull, getGeminiKey, setGeminiKey } from './auth-client.js'
 
   // ─── 사이트 잠금 (클라이언트 사이드 — 우회 가능, 우연한 접근 차단용) ──
   const DEFAULT_PW = '2525'
@@ -25,7 +25,8 @@
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
   let BASE_SOURCE = 'localStorage'  // 'auto' | 'localStorage'
-  const GEMINI_KEY = cfg.gemini_key || ''
+  // Gemini 키는 로그인 사용자(uid)별로 분리. 로그인 전엔 anon, 로그인하면 onUser에서 갱신.
+  let GEMINI_KEY = getGeminiKey()
   // 터널(tunnel.json)이 죽어도 항상 살아있는 영구 백엔드. 최종 fallback.
   const FALLBACK_BASE = 'https://ytdlp-25y.fly.dev'
 
@@ -157,7 +158,7 @@
     // 저장된 주소가 비었거나 죽었으면, 자동 발견된 정답 주소를 기본값으로 채운다
     if (!CANONICAL_BASE) { try { await discoverTunnelUrl() } catch (_) {} }
     $('#cfgBase').value = BASE || CANONICAL_BASE || ''
-    $('#cfgGeminiKey').value = GEMINI_KEY
+    $('#cfgGeminiKey').value = getGeminiKey()
     if (CANONICAL_BASE) {
       $('#cfgBaseHint').hidden = false
       $('#cfgUseCanonical').textContent = `↩ 현재 작동 주소 사용: ${CANONICAL_BASE}`
@@ -169,11 +170,10 @@
   }
   $('#cfgClose').onclick = () => { settingsModal.close(); startRefreshLoop() }
   $('#cfgSave').onclick = () => {
-    const newCfg = {
-      base: $('#cfgBase').value.trim().replace(/\/$/, ''),
-      gemini_key: $('#cfgGeminiKey').value.trim(),
-    }
-    localStorage.setItem('ytdlp_cfg', JSON.stringify(newCfg))
+    // 백엔드 주소는 공용(브라우저 단위), Gemini 키는 로그인 사용자(uid)별로 저장
+    localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: $('#cfgBase').value.trim().replace(/\/$/, '') }))
+    setGeminiKey($('#cfgGeminiKey').value.trim())
+    GEMINI_KEY = getGeminiKey()
     settingsModal.close()
     location.reload()
   }
@@ -769,6 +769,9 @@
   const _startOnce = () => { if (!__appStarted) { __appStarted = true; startApp() } }
   onUser((user) => {
     updateUserBadge(user)
+    // 로그인 사용자(uid)에 맞는 Gemini 키로 갱신 + 키 경고 재평가
+    GEMINI_KEY = getGeminiKey()
+    maybeShowKeyWarning()
     if (user) {
       sessionStorage.setItem('ytdlp_unlocked', '1')
       const dlg = $('#lockScreen'); if (dlg && dlg.open) dlg.close()

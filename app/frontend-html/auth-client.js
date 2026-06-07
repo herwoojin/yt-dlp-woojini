@@ -48,6 +48,19 @@ export async function onUser(cb) {
 export function currentUser() {
   return _auth ? _auth.currentUser : null;
 }
+
+// ── Gemini API 키를 로그인 사용자(uid)별로 분리 저장 ──
+// 같은 브라우저라도 계정마다 자기 키를 쓰게 한다. 비로그인 시 'anon'.
+function geminiKeyName() {
+  const u = _auth && _auth.currentUser;
+  return u ? `ytdlp_gemkey_${u.uid}` : "ytdlp_gemkey_anon";
+}
+export function getGeminiKey() {
+  try { return localStorage.getItem(geminiKeyName()) || ""; } catch (_) { return ""; }
+}
+export function setGeminiKey(k) {
+  try { localStorage.setItem(geminiKeyName(), (k || "").trim()); } catch (_) {}
+}
 export async function getIdTokenOrNull() {
   await _ready;
   const u = _auth && _auth.currentUser;
