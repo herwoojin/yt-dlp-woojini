@@ -520,7 +520,9 @@
       const div = document.createElement('div')
       div.innerHTML = text
       window._currentTtsText = div.textContent.trim()
-      status.textContent = '재생 준비 완료! (아래 플레이 버튼을 누르세요)'
+      audio.src = ''
+      $('#ttsGenBtn').disabled = false
+      status.textContent = '준비 완료! 아래 ▶ 음성 생성하고 재생 버튼을 누르세요.'
     } catch(err) {
       status.textContent = '❌ 블로그 글을 불러오지 못했습니다.'
     }
@@ -528,36 +530,42 @@
   // 인라인 onclick에서 호출하므로 전역으로 노출 (module 스코프 → window)
   window.openTtsPlayer = openTtsPlayer
 
-  // TTS 오디오 재생 이벤트
-  $('#ttsAudio').onplay = async function(e) {
-    if (!window._currentTtsText) return
-    if (this.src && this.src.startsWith('blob:')) return // 이미 생성됨
-
+  // 명시적 '생성 & 재생' 버튼 — 빈 src 오디오의 네이티브 재생은 트리거가 안 돼서 버튼으로 처리.
+  $('#ttsGenBtn').onclick = async function () {
+    const audio = $('#ttsAudio')
     const status = $('#ttsStatus')
-    status.textContent = '음성 생성 중... 잠시만 기다려주세요⏳'
-    this.pause()
-
+    if (!window._currentTtsText) { status.textContent = '먼저 블로그 글을 불러오세요.'; return }
+    // 이미 생성돼 있으면 그냥 재생
+    if (audio.src && audio.src.startsWith('blob:')) { audio.play(); status.textContent = '재생 중 🎵'; return }
+    this.disabled = true
+    const label = this.textContent
+    this.textContent = '⏳ 음성 생성 중…'
+    status.textContent = '음성 생성 중… 글이 길면 수십 초 걸릴 수 있어요.'
     try {
       const voice = $('#ttsVoice').value
       const rate = parseFloat($('#ttsRate').value)
-      
       const res = await fetch(`${BASE}/api/tts/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: window._currentTtsText, voice, rate })
       })
-      if (!res.ok) throw new Error('TTS 생성 실패')
+      if (!res.ok) throw new Error('TTS 생성 실패 (' + res.status + ')')
       const blob = await res.blob()
-      this.src = URL.createObjectURL(blob)
-      status.textContent = '재생 중 🎵'
-      this.play()
+      audio.src = URL.createObjectURL(blob)
+      await audio.play().catch(() => {})
+      status.textContent = '재생 중 🎵 (위 컨트롤로 일시정지/탐색 가능)'
     } catch(err) {
       status.textContent = '❌ 오디오 생성 오류: ' + err.message
+    } finally {
+      this.disabled = false
+      this.textContent = label
     }
   }
 
-  $('#ttsVoice').onchange = () => { $('#ttsAudio').src = ''; $('#ttsStatus').textContent = '설정 변경됨. 다시 재생을 누르세요.' }
-  $('#ttsRate').onchange = () => { $('#ttsAudio').src = ''; $('#ttsStatus').textContent = '설정 변경됨. 다시 재생을 누르세요.' }
+  // 음성/배속 변경 시: 생성된 오디오 무효화 → 다시 생성하도록
+  const _resetTts = () => { const a = $('#ttsAudio'); a.pause(); a.removeAttribute('src'); a.load(); $('#ttsStatus').textContent = '설정 변경됨. ▶ 음성 생성하고 재생을 다시 누르세요.' }
+  $('#ttsVoice').onchange = _resetTts
+  $('#ttsRate').onchange = _resetTts
   $('#ttsClose').onclick = () => { $('#ttsAudio').pause(); $('#ttsModal').close() }
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
@@ -1152,6 +1160,7 @@
       <label style="flex:1">배속 (<span id="ttsRateVal">1.0</span>x)</label>
       <input type="range" id="ttsRate" min="1.0" max="3.0" step="0.1" value="1.0" style="flex:2" oninput="document.getElementById('ttsRateVal').textContent=this.value" />
     </div>
+    <button id="ttsGenBtn" type="button" class="btn-primary" style="width:100%;margin-top:10px">▶ 음성 생성하고 재생</button>
     <div style="margin-top:10px">
       <audio id="ttsAudio" controls style="width:100%"></audio>
     </div>
