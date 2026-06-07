@@ -42,16 +42,28 @@ def _ensure_firebase() -> None:
 
 
 def verify_id_token(token: str) -> dict[str, Any]:
-    _ensure_firebase()
-    if not _firebase_ready:
+    """서비스 계정 없이 Firebase ID 토큰을 검증한다(구글 공개 인증서 사용).
+    google-auth의 verify_firebase_token으로 서명·발급자·audience(projectId)를 확인."""
+    if not config.FIREBASE_PROJECT_ID:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=_firebase_error or "firebase not configured",
+            detail="FIREBASE_PROJECT_ID 미설정",
         )
-    from firebase_admin import auth as fb_auth
-
     try:
-        return fb_auth.verify_id_token(token)
+        from google.oauth2 import id_token as g_id_token
+        from google.auth.transport import requests as g_requests
+
+        claims = g_id_token.verify_firebase_token(
+            token, g_requests.Request(), audience=config.FIREBASE_PROJECT_ID
+        )
+        if not claims:
+            raise ValueError("토큰 검증 실패(빈 클레임)")
+        uid = claims.get("user_id") or claims.get("sub")
+        if not uid:
+            raise ValueError("토큰에 uid 없음")
+        return {"uid": uid, "email": claims.get("email"), "claims": claims}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid id token: {exc}"
