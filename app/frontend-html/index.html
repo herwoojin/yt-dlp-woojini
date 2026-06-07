@@ -113,7 +113,8 @@
 
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
-    if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    const _gk = getGeminiKey()
+    if (_gk) headers['X-Gemini-Key'] = _gk
     const _tok = await getIdTokenOrNull()
     if (_tok) headers['Authorization'] = 'Bearer ' + _tok
     try {
@@ -183,11 +184,12 @@
     $('#toggleKey').textContent = inp.type === 'password' ? '👁' : '🙈'
   }
 
-  // ─── API 키 경고 배너 ─────────────────────────────
+  // ─── API 키 경고 배너 (키가 생기면 반드시 숨김) ─────────────
   function maybeShowKeyWarning() {
-    if (!GEMINI_KEY && BASE && !BASE.includes('localhost') && !BASE.includes('127.0.0.1')) {
-      $('#keyWarning').style.display = 'block'
-    }
+    const key = getGeminiKey()  // 항상 현재 로그인 사용자 키를 기준으로 판단
+    GEMINI_KEY = key
+    const needWarn = !key && BASE && !BASE.includes('localhost') && !BASE.includes('127.0.0.1')
+    $('#keyWarning').style.display = needWarn ? 'block' : 'none'
   }
   $('#keyWarningBtn').onclick = () => {
     settingsModal.showModal()
@@ -226,7 +228,8 @@
     status.textContent = '등록 중...'
     try {
       const body = { url: pendingSubmit.url, quality: pendingSubmit.quality, outputs }
-      if (GEMINI_KEY) body.gemini_api_key = GEMINI_KEY
+      const _gk = getGeminiKey()
+      if (_gk) body.gemini_api_key = _gk
       await api('/api/jobs', { method: 'POST', body: JSON.stringify(body) })
       $('#url').value = ''
       status.textContent = '등록됨 ✅'
@@ -544,12 +547,20 @@
     try {
       const voice = $('#ttsVoice').value
       const rate = parseFloat($('#ttsRate').value)
-      const res = await fetch(`${BASE}/api/tts/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: window._currentTtsText, voice, rate })
-      })
-      if (!res.ok) throw new Error('TTS 생성 실패 (' + res.status + ')')
+      const body = JSON.stringify({ text: window._currentTtsText, voice, rate })
+      // 설정된 백엔드 → 실패(404 등) 시 영구 백엔드(fly.dev)로 fallback
+      const bases = [BASE, FALLBACK_BASE].filter((v, i, a) => v && a.indexOf(v) === i)
+      let res = null, lastErr = null
+      for (const b of bases) {
+        try {
+          const r = await fetch(`${b}/api/tts/generate`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+          })
+          if (r.ok) { res = r; break }
+          lastErr = new Error('TTS 생성 실패 (' + r.status + ')')
+        } catch (e) { lastErr = e }
+      }
+      if (!res) throw lastErr || new Error('TTS 생성 실패')
       const blob = await res.blob()
       audio.src = URL.createObjectURL(blob)
       await audio.play().catch(() => {})
