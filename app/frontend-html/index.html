@@ -14,6 +14,7 @@
 <script type="module">
   // yt-dlp webapp 프론트엔드 (단일 HTML)
   // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
+  import { loginWithGoogle, logout, onUser, currentUser, getIdTokenOrNull } from './auth-client.js'
 
   // ─── 사이트 잠금 (클라이언트 사이드 — 우회 가능, 우연한 접근 차단용) ──
   const DEFAULT_PW = '2525'
@@ -112,6 +113,8 @@
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    const _tok = await getIdTokenOrNull()
+    if (_tok) headers['Authorization'] = 'Bearer ' + _tok
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
@@ -442,9 +445,12 @@
       const kindLabel = isScreenshotZip ? '📸 주요 장면 스크린샷' : escape(a.kind)
       const dlClass = isScreenshotZip ? 'art-action art-screenshot-dl' : 'art-action'
       const dlLabel = isScreenshotZip ? '📸 스크린샷 ZIP 다운로드' : '⬇ 다운로드'
+      const ttsBtn = (a.kind === 'blog_long' || a.filename === 'blog_long.html')
+        ? `<button class="art-action art-tts" style="background:#8b5cf6;color:#fff;border:0;cursor:pointer" onclick="openTtsPlayer('${j.id}', '${encodeURIComponent(a.filename)}')">🔊 블로그 읽기</button>`
+        : ''
       return `<li${isScreenshotZip ? ' class="art-screenshot-row"' : ''}>
         <span class="art-name">${kindLabel} — ${escape(a.filename)}</span>
-        <span class="art-actions">${previewBtn}<a class="${dlClass}" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>${dlLabel}</a></span>
+        <span class="art-actions">${ttsBtn}${previewBtn}<a class="${dlClass}" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>${dlLabel}</a></span>
       </li>`
     }).join('')
     const zipBtn = $('#dDownloadAll')
@@ -497,6 +503,60 @@
       setTimeout(() => { btn.textContent = orig; btn.disabled = false }, 2500)
     }
   }
+
+  // TTS 플레이어
+  async function openTtsPlayer(jobId, filename) {
+    const dlg = $('#ttsModal')
+    const status = $('#ttsStatus')
+    const audio = $('#ttsAudio')
+    status.textContent = '글을 불러오는 중...'
+    audio.src = ''
+    dlg.showModal()
+
+    try {
+      const full = await api(`/api/files/${jobId}/preview/${encodeURIComponent(filename)}`)
+      const text = typeof full === 'string' ? full : String(full)
+      // 간단히 HTML 태그 제거
+      const div = document.createElement('div')
+      div.innerHTML = text
+      window._currentTtsText = div.textContent.trim()
+      status.textContent = '재생 준비 완료! (아래 플레이 버튼을 누르세요)'
+    } catch(err) {
+      status.textContent = '❌ 블로그 글을 불러오지 못했습니다.'
+    }
+  }
+
+  // TTS 오디오 재생 이벤트
+  $('#ttsAudio').onplay = async function(e) {
+    if (!window._currentTtsText) return
+    if (this.src && this.src.startsWith('blob:')) return // 이미 생성됨
+
+    const status = $('#ttsStatus')
+    status.textContent = '음성 생성 중... 잠시만 기다려주세요⏳'
+    this.pause()
+
+    try {
+      const voice = $('#ttsVoice').value
+      const rate = parseFloat($('#ttsRate').value)
+      
+      const res = await fetch(`${BASE}/api/tts/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: window._currentTtsText, voice, rate })
+      })
+      if (!res.ok) throw new Error('TTS 생성 실패')
+      const blob = await res.blob()
+      this.src = URL.createObjectURL(blob)
+      status.textContent = '재생 중 🎵'
+      this.play()
+    } catch(err) {
+      status.textContent = '❌ 오디오 생성 오류: ' + err.message
+    }
+  }
+
+  $('#ttsVoice').onchange = () => { $('#ttsAudio').src = ''; $('#ttsStatus').textContent = '설정 변경됨. 다시 재생을 누르세요.' }
+  $('#ttsRate').onchange = () => { $('#ttsAudio').src = ''; $('#ttsStatus').textContent = '설정 변경됨. 다시 재생을 누르세요.' }
+  $('#ttsClose').onclick = () => { $('#ttsAudio').pause(); $('#ttsModal').close() }
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
@@ -574,8 +634,36 @@
     dlg.addEventListener('cancel', (e) => e.preventDefault())
     $('#lockBtn').onclick = tryUnlock
     pwInput.onkeydown = (e) => { if (e.key === 'Enter') tryUnlock() }
-    dlg.showModal()
+    // 구글 로그인 (로그인 성공 시 onUser 콜백이 앱을 시작함)
+    $('#lockGoogleBtn').onclick = async () => {
+      err.hidden = true
+      try {
+        await loginWithGoogle()
+      } catch (e) {
+        err.hidden = false
+        err.textContent = '구글 로그인 실패: ' + (e && e.message ? e.message : e)
+      }
+    }
+    if (!dlg.open) dlg.showModal()
     setTimeout(() => pwInput.focus(), 100)
+  }
+
+  // ─── 로그인 사용자 표시 ───
+  function updateUserBadge(user) {
+    const box = $('#userBadge')
+    if (!box) return
+    if (user) {
+      box.hidden = false
+      $('#userEmail').textContent = user.email || user.displayName || '로그인됨'
+    } else {
+      box.hidden = true
+    }
+  }
+  const _logoutBtn = $('#logoutBtn')
+  if (_logoutBtn) _logoutBtn.onclick = async () => {
+    await logout()
+    sessionStorage.removeItem('ytdlp_unlocked')
+    location.reload()
   }
 
   // ─── 관리자 모드 ─────────────────────────────────────
@@ -674,9 +762,21 @@
 
   $('#adminBtn').onclick = openAdminAuth
 
+  // Firebase 로그인 상태 우선: 로그인돼 있으면 비밀번호 없이 바로 앱 시작(각자 즉시 사용).
+  let __appStarted = false
+  const _startOnce = () => { if (!__appStarted) { __appStarted = true; startApp() } }
+  onUser((user) => {
+    updateUserBadge(user)
+    if (user) {
+      sessionStorage.setItem('ytdlp_unlocked', '1')
+      const dlg = $('#lockScreen'); if (dlg && dlg.open) dlg.close()
+      _startOnce()
+    }
+  })
+
   // 시작: 잠금 상태면 잠금 화면, 풀려 있으면 앱 시작
   if (isUnlocked()) {
-    startApp()
+    _startOnce()
   } else {
     setupLock()
   }
@@ -740,6 +840,12 @@
   .btn-row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px }
   .btn-primary { padding:10px 20px; background:#059669; color:#fff; border:0; border-radius:8px; font-weight:600; cursor:pointer }
   .btn-primary:hover { background:#047857 }
+  .google-btn { padding:11px 16px; background:#fff; color:#1f2937; border:1px solid #cbd5e1; border-radius:10px; font-weight:600; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center }
+  .google-btn:hover { background:#f8fafc }
+  .user-badge { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#475569; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:2px 6px 2px 10px; max-width:240px }
+  .user-badge #userEmail { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px }
+  .user-badge #logoutBtn { font-size:11px; border:0; background:#e2e8f0; color:#334155; border-radius:999px; padding:3px 8px; cursor:pointer }
+  .user-badge #logoutBtn:hover { background:#cbd5e1 }
   #dCopyBlog { width:100%; margin:14px 0 6px; padding:12px; background:#7c3aed; color:#fff; border:0; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer }
   #dCopyBlog:hover { background:#6d28d9 }
   #dCopyBlog:disabled { opacity:.7; cursor:wait }
@@ -878,11 +984,18 @@
 <!-- 잠금 화면: 진입 비밀번호 입력 -->
 <dialog id="lockScreen" class="lock-dlg">
   <div class="lock-icon">🔒</div>
-  <h2 style="margin:6px 0 4px;font-size:18px">잠긴 사이트</h2>
-  <p style="font-size:13px;color:#64748b;margin:0 0 14px">비밀번호를 입력하세요</p>
-  <input id="lockPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" />
-  <div id="lockError" class="lock-error" hidden>❌ 비밀번호가 틀립니다</div>
-  <button id="lockBtn" type="button" class="btn-primary" style="width:100%;margin-top:10px">잠금 해제</button>
+  <h2 style="margin:6px 0 4px;font-size:18px">[JINI+US] 글로 보는 유튜브</h2>
+  <p style="font-size:13px;color:#64748b;margin:0 0 14px">구글로 로그인하면 내 작업만 따로 보관됩니다</p>
+  <button id="lockGoogleBtn" type="button" class="google-btn" style="width:100%">
+    <svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:middle;margin-right:8px"><path fill="#FFC107" d="M43.6 20.5h-1.9V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-2.1 14.1-5.5l-6.5-5.5C29.6 34.5 26.9 35.5 24 35.5c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.5l6.5 5.5C40.9 36.7 44 31 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
+    Google로 로그인
+  </button>
+  <div id="lockError" class="lock-error" hidden style="margin-top:10px">❌ 비밀번호가 틀립니다</div>
+  <details style="margin-top:14px">
+    <summary style="font-size:12px;color:#94a3b8;cursor:pointer">비밀번호로 입장(임시)</summary>
+    <input id="lockPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" style="margin-top:8px" />
+    <button id="lockBtn" type="button" class="btn-secondary" style="width:100%;margin-top:8px">잠금 해제</button>
+  </details>
 </dialog>
 
 <!-- 관리자 인증 -->
@@ -935,7 +1048,8 @@
 <div class="wrap">
   <header>
     <h1>🎬 [JINI+US] 글로 보는 유튜브</h1>
-    <div style="display:flex;gap:6px;align-items:center">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <span id="userBadge" hidden class="user-badge"><span id="userEmail"></span><button id="logoutBtn" type="button">로그아웃</button></span>
       <a class="icon" href="/blog-studio.html" style="text-decoration:none"><button class="icon" type="button">📚 블로그 스튜디오</button></a>
       <button id="installBtn" class="icon" hidden type="button">📲 앱 설치</button>
       <button id="adminBtn" class="icon" type="button">🔐 관리자</button>
@@ -1016,6 +1130,28 @@
     <a id="dDownloadAll" class="btn-primary" style="padding:6px 12px;font-size:12px;text-decoration:none;display:none" download>📦 전체 ZIP 다운로드</a>
   </div>
   <ul id="dArtifacts"></ul>
+</dialog>
+
+<!-- TTS 모달 -->
+<dialog id="ttsModal" style="max-width:400px">
+  <div class="row"><strong style="font-size:16px">🔊 블로그 읽어주기</strong><button id="ttsClose" class="icon">닫기</button></div>
+  <div class="settings-form" style="margin-top:14px">
+    <div class="row2" style="align-items:center">
+      <label style="flex:1">음성</label>
+      <select id="ttsVoice" style="flex:2">
+        <option value="female">여성 (SunHi)</option>
+        <option value="male">남성 (InJoon)</option>
+      </select>
+    </div>
+    <div class="row2" style="align-items:center">
+      <label style="flex:1">배속 (<span id="ttsRateVal">1.0</span>x)</label>
+      <input type="range" id="ttsRate" min="1.0" max="3.0" step="0.1" value="1.0" style="flex:2" oninput="document.getElementById('ttsRateVal').textContent=this.value" />
+    </div>
+    <div style="margin-top:10px">
+      <audio id="ttsAudio" controls style="width:100%"></audio>
+    </div>
+    <div id="ttsStatus" class="hint" style="text-align:center;color:#7c3aed;font-weight:600"></div>
+  </div>
 </dialog>
 
 <!-- 설정 모달 -->
