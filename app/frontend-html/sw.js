@@ -1,7 +1,7 @@
 // 최소 service worker: PWA install 자격 충족 + 정적 셸 캐시.
 // API 응답은 캐시하지 않음 (job 상태가 실시간이라야 함).
-const CACHE = 'ytdlp-shell-v11';
-const SHELL = ['/', '/index.html', '/blog-studio.html', '/reference-images.html', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'ytdlp-shell-v12';
+const SHELL = ['/', '/index.html', '/blog-studio.html', '/reference-images.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
