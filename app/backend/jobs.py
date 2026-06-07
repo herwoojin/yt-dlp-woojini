@@ -303,6 +303,20 @@ class JobRegistry:
                 pass
         return [a for a in artifacts if a.kind != "video"]
 
+    def _prune_disk(self, jdir: Path, kept_artifacts: list[JobArtifact]) -> None:
+        """작업 폴더에 '보이는 산출물' 파일과 job.json만 남기고 나머지(내부 임시
+        파일: transcript_timed, *.vtt, *.info.json 등)는 삭제 — 선택한 것만 남도록."""
+        keep = {a.filename for a in kept_artifacts} | {"job.json"}
+        try:
+            for f in jdir.iterdir():
+                if f.is_file() and f.name not in keep:
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
     async def _run_job(self, job_id: str, gemini_api_key: str | None = None) -> None:
         job = self._jobs.get(job_id)
         if job is None:  # 큐에 있던 사이 삭제됨
@@ -357,6 +371,7 @@ class JobRegistry:
             if sub_err:
                 msg += f" 사유: {sub_err[:200]}"
             artifacts = self._drop_video_if_unwanted(jdir, artifacts, want("video"))
+            self._prune_disk(jdir, self._filter_artifacts(artifacts, job.outputs))
             await self._update(
                 job_id,
                 status=JobStatus.DONE,
@@ -406,6 +421,7 @@ class JobRegistry:
             if self.is_cancelled(job_id):
                 return
             artifacts = self._drop_video_if_unwanted(jdir, artifacts, want("video"))
+            self._prune_disk(jdir, self._filter_artifacts(artifacts, job.outputs))
             await self._update(
                 job_id,
                 status=JobStatus.DONE,
@@ -453,6 +469,9 @@ class JobRegistry:
             p = jdir / fname
             p.write_text(content, encoding="utf-8")
             artifacts.append(JobArtifact(kind=fname.split(".")[0], filename=fname, size_bytes=p.stat().st_size))
+
+        # 선택한 산출물 + 블로그 필수만 남기고 내부 임시 파일 정리
+        self._prune_disk(jdir, self._filter_artifacts(artifacts, job.outputs))
 
         await self._update(
             job_id,
