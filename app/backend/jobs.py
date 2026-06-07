@@ -290,6 +290,19 @@ class JobRegistry:
                 self._cancelled.discard(job_id)
                 self._queue.task_done()
 
+    def _drop_video_if_unwanted(self, jdir: Path, artifacts: list[JobArtifact],
+                                want_video: bool) -> list[JobArtifact]:
+        """영상을 선택하지 않았으면 디스크에서 즉시 삭제하고 목록에서도 제거(서버 용량 보호)."""
+        if want_video:
+            return artifacts
+        vp = self._find_video(jdir)
+        if vp:
+            try:
+                vp.unlink()
+            except OSError:
+                pass
+        return [a for a in artifacts if a.kind != "video"]
+
     async def _run_job(self, job_id: str, gemini_api_key: str | None = None) -> None:
         job = self._jobs.get(job_id)
         if job is None:  # 큐에 있던 사이 삭제됨
@@ -315,6 +328,11 @@ class JobRegistry:
             if p.exists():
                 artifacts.append(JobArtifact(kind=kind, filename=p.name, size_bytes=p.stat().st_size))
 
+        wants = set(job.outputs) if job.outputs is not None else None
+
+        def want(k: str) -> bool:
+            return wants is None or k in wants
+
         await self._update(
             job_id,
             status=JobStatus.TRANSCRIBING,
@@ -335,9 +353,10 @@ class JobRegistry:
         # 3) Gemini outputs (skip gracefully if no transcript)
         if not has_transcript:
             sub_err = info.get("subtitle_error")
-            msg = "자막을 가져올 수 없어 요약/목차 생성을 건너뜁니다 (영상은 저장됨)."
+            msg = "자막을 가져올 수 없어 요약/목차 생성을 건너뜁니다."
             if sub_err:
                 msg += f" 사유: {sub_err[:200]}"
+            artifacts = self._drop_video_if_unwanted(jdir, artifacts, want("video"))
             await self._update(
                 job_id,
                 status=JobStatus.DONE,
@@ -356,11 +375,6 @@ class JobRegistry:
             message="Gemini로 목차/요약/HTML 생성 중",
             artifacts=artifacts,
         )
-        wants = set(job.outputs) if job.outputs is not None else None
-
-        def want(k: str) -> bool:
-            return wants is None or k in wants
-
         try:
             results = await asyncio.to_thread(
                 gemini.generate_all,
@@ -391,11 +405,12 @@ class JobRegistry:
             # 중지된 작업이면 CANCELLED 유지 (DONE으로 덮지 않음)
             if self.is_cancelled(job_id):
                 return
+            artifacts = self._drop_video_if_unwanted(jdir, artifacts, want("video"))
             await self._update(
                 job_id,
                 status=JobStatus.DONE,
                 progress=1.0,
-                message=f"영상/스크립트는 저장됨. {hint}",
+                message=hint,
                 artifacts=artifacts,
             )
             return
@@ -415,10 +430,14 @@ class JobRegistry:
         try:
             artifacts, updated_blog_html = await self._run_screenshots(
                 job_id, jdir, info, results, artifacts,
+                want_screenshots=want("screenshots"),
             )
             results["blog_html"] = updated_blog_html
         except Exception as exc:
             log.warning("screenshot step failed (non-fatal): %s", exc)
+
+        # 영상은 블로그용 자막/스크린샷 추출에만 필요 → 선택 안 했으면 사용 직후 즉시 삭제(서버 용량 보호)
+        artifacts = self._drop_video_if_unwanted(jdir, artifacts, want("video"))
 
         # blog_long은 항상 생성. chapters/summary/email은 선택 시에만 파일로 남김.
         to_write: list[tuple[str, str]] = [
@@ -434,20 +453,6 @@ class JobRegistry:
             p = jdir / fname
             p.write_text(content, encoding="utf-8")
             artifacts.append(JobArtifact(kind=fname.split(".")[0], filename=fname, size_bytes=p.stat().st_size))
-
-        # 선택 안 한 대용량 산출물은 디스크에서도 삭제 (목록 필터링은 _update가 자동 처리)
-        if wants is not None:
-            for a in artifacts:
-                if a.kind == "video" and not want("video"):
-                    try:
-                        (jdir / a.filename).unlink()
-                    except OSError:
-                        pass
-                elif a.kind == "screenshots_zip" and not want("screenshots"):
-                    try:
-                        (jdir / a.filename).unlink()
-                    except OSError:
-                        pass
 
         await self._update(
             job_id,
@@ -465,8 +470,10 @@ class JobRegistry:
         info: dict,
         results: dict,
         artifacts: list[JobArtifact],
+        want_screenshots: bool = True,
     ) -> tuple[list[JobArtifact], str]:
-        """Capture blog images + key scene screenshots. Returns (updated artifacts, updated blog_html)."""
+        """Capture blog images (always, for blog) + optional key-scene ZIP.
+        blog 이미지는 블로그에 필요해 항상 캡처. 키 장면 ZIP은 want_screenshots일 때만."""
         blog_html = results["blog_html"]
         video_path = self._find_video(jdir)
         if not video_path:
@@ -494,7 +501,9 @@ class JobRegistry:
                 ))
             log.info("captured %d/%d blog images", len(captured), len(blog_timestamps))
 
-        # 2) Key scene screenshots (~20 webp) + ZIP
+        # 2) Key scene screenshots (~20 webp) + ZIP — 선택했을 때만 작업 수행
+        if not want_screenshots:
+            return artifacts, blog_html
         chapters = results.get("chapters", [])
         duration = info.get("duration")
         scene_results = await asyncio.to_thread(
