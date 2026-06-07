@@ -34,5 +34,21 @@
       "type": "image/svg+xml",
       "purpose": "any"
     }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-narrow.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "JINI+US 메인 화면 - 유튜브 영상 요약"
+    },
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "JINI+US 데스크톱 화면 - 작업 목록"
+    }
   ]
 }

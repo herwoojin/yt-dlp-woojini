@@ -1,7 +1,70 @@
 [build]
   publish = "app/frontend-html"
 
-# SPA 라우팅: 모든 경로를 index.html로
+# .webmanifest 파일에 올바른 Content-Type 헤더 설정
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+    Access-Control-Allow-Origin = "*"
+
+# sw.js에 올바른 Content-Type 설정
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Content-Type = "application/javascript"
+    Service-Worker-Allowed = "/"
+
+# 정적 파일은 redirect하지 않고 그대로 서빙 (manifest, SW, 아이콘, JSON 등)
+[[redirects]]
+  from = "/manifest.webmanifest"
+  to   = "/manifest.webmanifest"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/sw.js"
+  to   = "/sw.js"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/icon-192.png"
+  to   = "/icon-192.png"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/icon-512.png"
+  to   = "/icon-512.png"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/icon.svg"
+  to   = "/icon.svg"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/tunnel.json"
+  to   = "/tunnel.json"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/techstack.json"
+  to   = "/techstack.json"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/.well-known/*"
+  to   = "/.well-known/:splat"
+  status = 200
+  force = false
+
+# SPA 라우팅: 위의 정적 파일 규칙에 매칭되지 않은 나머지 경로만 index.html로
 [[redirects]]
   from = "/*"
   to   = "/index.html"
