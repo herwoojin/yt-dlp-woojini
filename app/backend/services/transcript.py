@@ -74,6 +74,8 @@ def build_transcript_txt(job_dir: Path, info: dict[str, Any]) -> str:
 
     plain_text = " ".join(text for _, text in pairs)
     plain_text = re.sub(r"\s+", " ", plain_text).strip()
+    # 문장이 끝나는 부호(. ! ?) 뒤에 줄바꿈(엔터 2번)을 추가하여 가독성 개선
+    plain_text = re.sub(r"([.!?])\s+", r"\1\n\n", plain_text)
     (job_dir / "transcript.txt").write_text(plain_text, encoding="utf-8")
 
     timed_lines = [f"[{ts}] {text}" for ts, text in pairs]
