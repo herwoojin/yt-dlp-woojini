@@ -13,6 +13,7 @@
 <script type="module">
   // ── 멀티 영상 → 하나의 long blog 생성 스튜디오 (단일 HTML) ──
   // index.html 과 동일한 백엔드 연결 방식(tunnel.json 발견 + 사용자 설정)을 재사용한다.
+  import { getIdTokenOrNull } from './auth-client.js'
 
   // ─── 사이트 잠금 상태 공유 (index.html 과 동일 키) ───
   const isUnlocked = () => sessionStorage.getItem('ytdlp_unlocked') === '1'
@@ -59,6 +60,8 @@
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    const _tok = await getIdTokenOrNull()
+    if (_tok) headers['Authorization'] = 'Bearer ' + _tok
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {

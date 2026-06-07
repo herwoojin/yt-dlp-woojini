@@ -15,11 +15,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from ..auth import UserDep
 from ..jobs import registry
 from ..models import JobInfo
 from ..services.storage import job_dir
 
+# 파일 제공은 인증 없이 job_id(추측 불가한 12자리 = capability)로 접근한다.
+# 이유: <img>/다운로드/Tistory 붙여넣기 등 브라우저가 Authorization 헤더를 못 싣는
+# 컨텍스트에서도 이미지가 보여야 하기 때문. 무엇을 '보는지'(목록/상세)는 로그인으로 격리됨.
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 
@@ -39,11 +41,9 @@ def _download_basename(job: JobInfo) -> str:
     return f"{title}_{date}"
 
 
-def _check_access(job: JobInfo | None, user: dict) -> JobInfo:
+def _check_access(job: JobInfo | None) -> JobInfo:
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
-    if job.owner_uid not in (None, user["uid"]) and not user["uid"].startswith("local"):
-        raise HTTPException(status_code=403, detail="forbidden")
     return job
 
 
@@ -55,8 +55,8 @@ def _safe_unlink(path: str) -> None:
 
 
 @router.get("/{job_id}/_archive.zip")
-async def download_archive(job_id: str, user=UserDep) -> FileResponse:
-    job = _check_access(registry.get(job_id), user)
+async def download_archive(job_id: str) -> FileResponse:
+    job = _check_access(registry.get(job_id))
     jdir = job_dir(job_id).resolve()
 
     tmp = tempfile.NamedTemporaryFile(prefix=f"{job_id}_", suffix=".zip", delete=False)
@@ -86,9 +86,9 @@ async def download_archive(job_id: str, user=UserDep) -> FileResponse:
 
 
 @router.get("/{job_id}/preview/{filename}")
-async def preview_file(job_id: str, filename: str, user=UserDep) -> FileResponse:
+async def preview_file(job_id: str, filename: str) -> FileResponse:
     """다운로드 대신 브라우저에서 inline 렌더링 (HTML 미리보기 등)."""
-    _check_access(registry.get(job_id), user)
+    _check_access(registry.get(job_id))
     jdir = job_dir(job_id).resolve()
     target = (jdir / filename).resolve()
     if not str(target).startswith(str(jdir)):
@@ -112,8 +112,8 @@ async def preview_file(job_id: str, filename: str, user=UserDep) -> FileResponse
 
 
 @router.get("/{job_id}/{filename}")
-async def get_file(job_id: str, filename: str, user=UserDep) -> FileResponse:
-    job = _check_access(registry.get(job_id), user)
+async def get_file(job_id: str, filename: str) -> FileResponse:
+    job = _check_access(registry.get(job_id))
     jdir = job_dir(job_id).resolve()
     target = (jdir / filename).resolve()
     if not str(target).startswith(str(jdir)):

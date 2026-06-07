@@ -9,7 +9,10 @@ primary_region = "nrt"  # Tokyo: 한국에서 가장 가까운 region
 
 # 런타임 env vars (비밀이 아닌 것)
 [env]
+  # 1단계: 로그인 동작 확인 전까지 true 유지(앱 안 깨짐). 확인 후 false로 전환하면
+  #        구글 ID 토큰 검증이 켜져 사용자별 격리가 강제된다. (즉시 롤백 = 다시 true)
   ALLOW_INSECURE_AUTH = "true"
+  FIREBASE_PROJECT_ID = "poetic-sentinel-468112-a1"
   TELEGRAM_ENABLED = "false"
   DOWNLOAD_DIR = "/data/downloads"
   # CORS: 25y.netlify.app과 모든 netlify deploy preview 허용 (regex)

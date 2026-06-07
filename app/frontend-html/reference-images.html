@@ -11,6 +11,7 @@
 <script type="module">
   // ── 블로그에 참조된 이미지(blog_image)를 영상별로 모아 보여주는 전용 페이지 ──
   // index.html / blog-studio.html 과 동일한 백엔드 연결 방식을 재사용한다.
+  import { getIdTokenOrNull } from './auth-client.js'
 
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
@@ -49,6 +50,8 @@
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
+    const _tok = await getIdTokenOrNull()
+    if (_tok) headers['Authorization'] = 'Bearer ' + _tok
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
