@@ -67,20 +67,12 @@
   }
 
   async function ensureBase() {
-    // 영상 다운로드는 맥(가정용 IP) 백엔드여야 YouTube가 안 막는다.
-    // → 사용자가 fly.dev로 고정해두면 다운로드가 막히므로, fly.dev면 무시하고 터널 사용.
-    if (cfg.base && !cfg.base.includes('fly.dev')) {
+    // 맥 없이 모바일에서도 동작해야 하므로 항상 켜져있는 fly.dev를 기본 백엔드로 사용.
+    // (죽기 쉬운 trycloudflare 터널 주소는 무시)
+    if (cfg.base && !cfg.base.includes('trycloudflare.com')) {
       BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return
     }
-    // tunnel.json(맥 cloudflared URL) 우선. 실패 시 api()가 fly.dev로 fallback.
-    const s = await checkRebuildState()
-    if (s) {
-      BASE = s.canonical.base
-      BASE_SOURCE = 'auto'
-      if (s.rebuilding) startRebuildBanner(s)
-    } else {
-      BASE = FALLBACK_BASE; BASE_SOURCE = 'auto'
-    }
+    BASE = FALLBACK_BASE; BASE_SOURCE = 'auto'
   }
 
   // ─── 리빌드 진행 배너 ───────────────────────────────

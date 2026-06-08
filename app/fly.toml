@@ -11,6 +11,8 @@ primary_region = "nrt"  # Tokyo: 한국에서 가장 가까운 region
 [env]
   # 구글 로그인 제거 → 비밀번호(2525) 입장으로 복귀. 토큰 불필요(모두 공용).
   ALLOW_INSECURE_AUTH = "true"
+  # YouTube 봇차단 우회용 쿠키 파일(볼륨). 파일이 있으면 yt-dlp가 사용, 없으면 무시.
+  YT_DLP_COOKIES_FILE = "/data/cookies.txt"
   FIREBASE_PROJECT_ID = "poetic-sentinel-468112-a1"
   TELEGRAM_ENABLED = "false"
   DOWNLOAD_DIR = "/data/downloads"
