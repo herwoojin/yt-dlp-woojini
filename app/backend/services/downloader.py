@@ -41,6 +41,10 @@ def _base_opts() -> dict[str, Any]:
     cookies = os.getenv("YT_DLP_COOKIES_FILE")
     if cookies and os.path.exists(cookies):
         opts["cookiefile"] = cookies
+    # 거주용(residential) 프록시: fly.dev 데이터센터 IP 차단 우회. 예: http://user:pass@host:port
+    proxy = os.getenv("YT_DLP_PROXY")
+    if proxy:
+        opts["proxy"] = proxy
     return opts
 
 
