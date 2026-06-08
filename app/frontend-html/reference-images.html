@@ -50,8 +50,6 @@
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     const _gk = getGeminiKey()
     if (_gk) headers['X-Gemini-Key'] = _gk
-    const _tok = await getIdTokenOrNull()
-    if (_tok) headers['Authorization'] = 'Bearer ' + _tok
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {

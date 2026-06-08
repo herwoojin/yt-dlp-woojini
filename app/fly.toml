@@ -9,9 +9,8 @@ primary_region = "nrt"  # Tokyo: 한국에서 가장 가까운 region
 
 # 런타임 env vars (비밀이 아닌 것)
 [env]
-  # 2단계: 구글 ID 토큰 검증 강제 → 사용자별 격리 활성.
-  #        문제 시 즉시 롤백: 이 값을 "true"로 바꿔 재배포.
-  ALLOW_INSECURE_AUTH = "false"
+  # 구글 로그인 제거 → 비밀번호(2525) 입장으로 복귀. 토큰 불필요(모두 공용).
+  ALLOW_INSECURE_AUTH = "true"
   FIREBASE_PROJECT_ID = "poetic-sentinel-468112-a1"
   TELEGRAM_ENABLED = "false"
   DOWNLOAD_DIR = "/data/downloads"
