@@ -58,13 +58,12 @@ watcher() {
     local url
     url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG" 2>/dev/null | tail -1)
     if [ -n "$url" ] && [ "$url" != "$prev" ]; then
-      if curl -fsS -o /dev/null --max-time 8 "$url/health" 2>/dev/null; then
-        publish "$url"
-        echo "$(date +%s)" > /tmp/ytdlp-tunnel-published-at
-        prev="$url"
-      else
-        log "URL $url not reachable yet, waiting..."
-      fi
+      # 맥은 자기 터널 URL을 curl로 못 잡는다(hairpin/DNS). 외부(모바일)에선 접속되므로
+      # self-curl 검증 없이 cloudflared가 새 URL을 로그하면 즉시 발행한다.
+      sleep 6   # 터널 등록/DNS 전파 잠깐 대기
+      publish "$url"
+      echo "$(date +%s)" > /tmp/ytdlp-tunnel-published-at
+      prev="$url"
     fi
   done
 }
@@ -109,11 +108,11 @@ healthcheck() {
 : > "$HOME/Library/Logs/ytdlp-tunnel.out.log"
 rm -f /tmp/ytdlp-tunnel-published-at
 
+# healthcheck는 맥이 자기 터널을 curl 못 해서 무조건 실패 → cloudflared를 계속 죽여
+# URL이 churn하는 원인이었다. 비활성화(cloudflared가 실제로 죽으면 launchd가 재시작).
 watcher &
 WATCHER_PID=$!
-healthcheck &
-HEALTH_PID=$!
-trap "kill $WATCHER_PID $HEALTH_PID 2>/dev/null || true" EXIT
+trap "kill $WATCHER_PID 2>/dev/null || true" EXIT
 
 log "starting cloudflared..."
 "$CLOUDFLARED" tunnel --no-autoupdate --url http://127.0.0.1:8000 >> "$HOME/Library/Logs/ytdlp-tunnel.out.log" 2>> "$LOG"
