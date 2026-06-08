@@ -45,7 +45,8 @@
   }
 
   async function ensureBase() {
-    if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); return }
+    // fly.dev(데이터센터)는 다운로드가 막히므로 무시하고 맥 터널 사용
+    if (cfg.base && !cfg.base.includes('fly.dev')) { BASE = cfg.base.replace(/\/$/, ''); return }
     const found = await discoverTunnelUrl()
     if (found) BASE = found
   }
