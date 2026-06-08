@@ -24,6 +24,10 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, li
 
 
 def _base_opts() -> dict[str, Any]:
+    # YouTube 403(데이터센터 IP 차단) 우회: web 대신 tv/ios 등 다른 player_client 사용.
+    # 환경변수 YT_DLP_PLAYER_CLIENTS 로 조정 가능(쉼표구분).
+    player_clients = [c.strip() for c in os.getenv(
+        "YT_DLP_PLAYER_CLIENTS", "tv,ios,web_safari,web").split(",") if c.strip()]
     opts: dict[str, Any] = {
         "noplaylist": True,
         "quiet": True,
@@ -32,6 +36,7 @@ def _base_opts() -> dict[str, Any]:
         "fragment_retries": 5,
         "extractor_retries": 3,
         "http_headers": {"User-Agent": UA},
+        "extractor_args": {"youtube": {"player_client": player_clients}},
     }
     cookies = os.getenv("YT_DLP_COOKIES_FILE")
     if cookies and os.path.exists(cookies):
