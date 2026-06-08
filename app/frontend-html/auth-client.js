@@ -26,9 +26,12 @@ const _ready = (async () => {
     _auth = authMod.getAuth(app);
     authMod.setPersistence(_auth, authMod.browserLocalPersistence).catch(() => {});
     const provider = new authMod.GoogleAuthProvider();
-    _login = () => authMod.signInWithPopup(_auth, provider);
+    // 팝업은 COOP(Cross-Origin-Opener-Policy)로 막혀 튕기는 경우가 많아 리디렉트 방식 사용.
+    _login = () => authMod.signInWithRedirect(_auth, provider);
     _logout = () => authMod.signOut(_auth);
     _onUserRaw = (cb) => authMod.onAuthStateChanged(_auth, cb);
+    // 리디렉트로 돌아온 직후 결과 처리(에러 로깅용). 로그인 자체는 onAuthStateChanged가 처리.
+    authMod.getRedirectResult(_auth).catch((e) => console.warn("redirect login result", e));
     // Firestore (키 동기화용) — 실패해도 localStorage-only 로 동작
     try {
       const fsMod = await import(`${V}/firebase-firestore.js`);
