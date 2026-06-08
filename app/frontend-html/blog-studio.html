@@ -13,14 +13,13 @@
 <script type="module">
   // ── 멀티 영상 → 하나의 long blog 생성 스튜디오 (단일 HTML) ──
   // index.html 과 동일한 백엔드 연결 방식(tunnel.json 발견 + 사용자 설정)을 재사용한다.
-  import { getIdTokenOrNull, getGeminiKey, setGeminiKey } from './auth-client.js'
 
   // ─── 사이트 잠금 상태 공유 (index.html 과 동일 키) ───
   const isUnlocked = () => sessionStorage.getItem('ytdlp_unlocked') === '1'
 
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
-  // Gemini 키는 로그인 사용자(uid)별 — getGeminiKey()로 매번 현재 키를 읽는다.
+  const GEMINI_KEY = cfg.gemini_key || ''
   const FALLBACK_BASE = 'https://ytdlp-25y.fly.dev'  // 터널이 죽어도 항상 살아있는 영구 백엔드
 
   const GITHUB_RAW_TUNNEL = 'https://raw.githubusercontent.com/herwoojin/yt-dlp-woojini/master/app/frontend-html/tunnel.json'
@@ -45,11 +44,9 @@
   }
 
   async function ensureBase() {
-    // 맥 없이도 동작하도록 fly.dev 기본 사용(터널 주소는 무시)
-    if (cfg.base && !cfg.base.includes('trycloudflare.com')) { BASE = cfg.base.replace(/\/$/, ''); return }
+    if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); return }
     const found = await discoverTunnelUrl()
-    if (found && found.includes('fly.dev')) { BASE = found }
-    else { BASE = FALLBACK_BASE }
+    if (found) BASE = found
   }
 
   // ─── API helper (index.html 의 api() 와 동일한 헤더/재발견 전략) ───
@@ -61,8 +58,7 @@
   }
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
-    const _gk = getGeminiKey()
-    if (_gk) headers['X-Gemini-Key'] = _gk
+    if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
@@ -97,14 +93,16 @@
   const settingsModal = $('#settingsModal')
   $('#cfgBtn').onclick = () => {
     $('#cfgBase').value = BASE
-    $('#cfgGeminiKey').value = getGeminiKey()
+    $('#cfgGeminiKey').value = GEMINI_KEY
     settingsModal.showModal()
   }
   $('#cfgClose').onclick = () => settingsModal.close()
-  $('#cfgSave').onclick = async () => {
-    localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: $('#cfgBase').value.trim().replace(/\/$/, '') }))
-    $('#cfgSave').disabled = true
-    await setGeminiKey($('#cfgGeminiKey').value.trim())
+  $('#cfgSave').onclick = () => {
+    const newCfg = {
+      base: $('#cfgBase').value.trim().replace(/\/$/, ''),
+      gemini_key: $('#cfgGeminiKey').value.trim(),
+    }
+    localStorage.setItem('ytdlp_cfg', JSON.stringify(newCfg))
     settingsModal.close()
     location.reload()
   }

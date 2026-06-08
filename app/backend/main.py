@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .jobs import registry
-from .routes import files, jobs, settings, tts
+from .routes import files, jobs, settings
 from .services import telegram_bot
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend-html"
@@ -51,7 +51,6 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(settings.router)
 app.include_router(files.router)
-app.include_router(tts.router)
 
 
 @app.get("/health")

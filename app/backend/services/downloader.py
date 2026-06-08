@@ -33,18 +33,9 @@ def _base_opts() -> dict[str, Any]:
         "extractor_retries": 3,
         "http_headers": {"User-Agent": UA},
     }
-    # 쿠키가 있으면 yt-dlp 기본 클라이언트(web 등)가 잘 동작하므로 player_client는 강제하지 않는다.
-    # 필요 시 환경변수 YT_DLP_PLAYER_CLIENTS(쉼표구분)로만 지정.
-    player_clients = [c.strip() for c in os.getenv("YT_DLP_PLAYER_CLIENTS", "").split(",") if c.strip()]
-    if player_clients:
-        opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
     cookies = os.getenv("YT_DLP_COOKIES_FILE")
     if cookies and os.path.exists(cookies):
         opts["cookiefile"] = cookies
-    # 거주용(residential) 프록시: fly.dev 데이터센터 IP 차단 우회. 예: http://user:pass@host:port
-    proxy = os.getenv("YT_DLP_PROXY")
-    if proxy:
-        opts["proxy"] = proxy
     return opts
 
 

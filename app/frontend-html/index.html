@@ -14,7 +14,6 @@
 <script type="module">
   // yt-dlp webapp 프론트엔드 (단일 HTML)
   // Netlify 정적 배포 + 사용자별 Gemini API 키 지원
-  import { loginWithGoogle, logout, onUser, currentUser, getIdTokenOrNull, getGeminiKey, setGeminiKey } from './auth-client.js'
 
   // ─── 사이트 잠금 (클라이언트 사이드 — 우회 가능, 우연한 접근 차단용) ──
   const DEFAULT_PW = '2525'
@@ -25,8 +24,7 @@
   const cfg = JSON.parse(localStorage.getItem('ytdlp_cfg') || '{}')
   let BASE = cfg.base || ''
   let BASE_SOURCE = 'localStorage'  // 'auto' | 'localStorage'
-  // Gemini 키는 로그인 사용자(uid)별로 분리. 로그인 전엔 anon, 로그인하면 onUser에서 갱신.
-  let GEMINI_KEY = getGeminiKey()
+  const GEMINI_KEY = cfg.gemini_key || ''
   // 터널(tunnel.json)이 죽어도 항상 살아있는 영구 백엔드. 최종 fallback.
   const FALLBACK_BASE = 'https://ytdlp-25y.fly.dev'
 
@@ -67,12 +65,14 @@
   }
 
   async function ensureBase() {
-    // 맥 없이 모바일에서도 동작해야 하므로 항상 켜져있는 fly.dev를 기본 백엔드로 사용.
-    // (죽기 쉬운 trycloudflare 터널 주소는 무시)
-    if (cfg.base && !cfg.base.includes('trycloudflare.com')) {
-      BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return
+    // 사용자가 명시적으로 설정한 base가 있으면 그것을 우선
+    if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return }
+    const s = await checkRebuildState()
+    if (s) {
+      BASE = s.canonical.base
+      BASE_SOURCE = 'auto'
+      if (s.rebuilding) startRebuildBanner(s)
     }
-    BASE = FALLBACK_BASE; BASE_SOURCE = 'auto'
   }
 
   // ─── 리빌드 진행 배너 ───────────────────────────────
@@ -111,8 +111,7 @@
 
   async function api(path, init = {}) {
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
-    const _gk = getGeminiKey()
-    if (_gk) headers['X-Gemini-Key'] = _gk
+    if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
     try {
       return await _parseResp(await fetch(BASE + path, { ...init, headers }))
     } catch (err) {
@@ -155,7 +154,7 @@
     // 저장된 주소가 비었거나 죽었으면, 자동 발견된 정답 주소를 기본값으로 채운다
     if (!CANONICAL_BASE) { try { await discoverTunnelUrl() } catch (_) {} }
     $('#cfgBase').value = BASE || CANONICAL_BASE || ''
-    $('#cfgGeminiKey').value = getGeminiKey()
+    $('#cfgGeminiKey').value = GEMINI_KEY
     if (CANONICAL_BASE) {
       $('#cfgBaseHint').hidden = false
       $('#cfgUseCanonical').textContent = `↩ 현재 작동 주소 사용: ${CANONICAL_BASE}`
@@ -166,12 +165,12 @@
     settingsModal.showModal()
   }
   $('#cfgClose').onclick = () => { settingsModal.close(); startRefreshLoop() }
-  $('#cfgSave').onclick = async () => {
-    // 백엔드 주소는 공용(브라우저 단위), Gemini 키는 계정(uid)별 — Firestore에도 저장(기기 간 동기화)
-    localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: $('#cfgBase').value.trim().replace(/\/$/, '') }))
-    $('#cfgSave').disabled = true
-    await setGeminiKey($('#cfgGeminiKey').value.trim())  // Firestore 저장 완료까지 대기 후 새로고침
-    GEMINI_KEY = getGeminiKey()
+  $('#cfgSave').onclick = () => {
+    const newCfg = {
+      base: $('#cfgBase').value.trim().replace(/\/$/, ''),
+      gemini_key: $('#cfgGeminiKey').value.trim(),
+    }
+    localStorage.setItem('ytdlp_cfg', JSON.stringify(newCfg))
     settingsModal.close()
     location.reload()
   }
@@ -181,12 +180,11 @@
     $('#toggleKey').textContent = inp.type === 'password' ? '👁' : '🙈'
   }
 
-  // ─── API 키 경고 배너 (키가 생기면 반드시 숨김) ─────────────
+  // ─── API 키 경고 배너 ─────────────────────────────
   function maybeShowKeyWarning() {
-    const key = getGeminiKey()  // 항상 현재 로그인 사용자 키를 기준으로 판단
-    GEMINI_KEY = key
-    const needWarn = !key && BASE && !BASE.includes('localhost') && !BASE.includes('127.0.0.1')
-    $('#keyWarning').style.display = needWarn ? 'block' : 'none'
+    if (!GEMINI_KEY && BASE && !BASE.includes('localhost') && !BASE.includes('127.0.0.1')) {
+      $('#keyWarning').style.display = 'block'
+    }
   }
   $('#keyWarningBtn').onclick = () => {
     settingsModal.showModal()
@@ -225,8 +223,7 @@
     status.textContent = '등록 중...'
     try {
       const body = { url: pendingSubmit.url, quality: pendingSubmit.quality, outputs }
-      const _gk = getGeminiKey()
-      if (_gk) body.gemini_api_key = _gk
+      if (GEMINI_KEY) body.gemini_api_key = GEMINI_KEY
       await api('/api/jobs', { method: 'POST', body: JSON.stringify(body) })
       $('#url').value = ''
       status.textContent = '등록됨 ✅'
@@ -445,12 +442,9 @@
       const kindLabel = isScreenshotZip ? '📸 주요 장면 스크린샷' : escape(a.kind)
       const dlClass = isScreenshotZip ? 'art-action art-screenshot-dl' : 'art-action'
       const dlLabel = isScreenshotZip ? '📸 스크린샷 ZIP 다운로드' : '⬇ 다운로드'
-      const ttsBtn = (a.kind === 'blog_long' || a.filename === 'blog_long.html')
-        ? `<button class="art-action art-tts" style="background:#8b5cf6;color:#fff;border:0;cursor:pointer" onclick="openTtsPlayer('${j.id}', '${encodeURIComponent(a.filename)}')">🔊 블로그 읽기</button>`
-        : ''
       return `<li${isScreenshotZip ? ' class="art-screenshot-row"' : ''}>
         <span class="art-name">${kindLabel} — ${escape(a.filename)}</span>
-        <span class="art-actions">${ttsBtn}${previewBtn}<a class="${dlClass}" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>${dlLabel}</a></span>
+        <span class="art-actions">${previewBtn}<a class="${dlClass}" href="${BASE}/api/files/${j.id}/${encodeURIComponent(a.filename)}" download>${dlLabel}</a></span>
       </li>`
     }).join('')
     const zipBtn = $('#dDownloadAll')
@@ -503,78 +497,6 @@
       setTimeout(() => { btn.textContent = orig; btn.disabled = false }, 2500)
     }
   }
-
-  // TTS 플레이어
-  async function openTtsPlayer(jobId, filename) {
-    const dlg = $('#ttsModal')
-    const status = $('#ttsStatus')
-    const audio = $('#ttsAudio')
-    status.textContent = '글을 불러오는 중...'
-    audio.src = ''
-    dlg.showModal()
-
-    try {
-      const full = await api(`/api/files/${jobId}/preview/${encodeURIComponent(filename)}`)
-      const text = typeof full === 'string' ? full : String(full)
-      // 간단히 HTML 태그 제거
-      const div = document.createElement('div')
-      div.innerHTML = text
-      window._currentTtsText = div.textContent.trim()
-      audio.src = ''
-      $('#ttsGenBtn').disabled = false
-      status.textContent = '준비 완료! 아래 ▶ 음성 생성하고 재생 버튼을 누르세요.'
-    } catch(err) {
-      status.textContent = '❌ 블로그 글을 불러오지 못했습니다.'
-    }
-  }
-  // 인라인 onclick에서 호출하므로 전역으로 노출 (module 스코프 → window)
-  window.openTtsPlayer = openTtsPlayer
-
-  // 명시적 '생성 & 재생' 버튼 — 빈 src 오디오의 네이티브 재생은 트리거가 안 돼서 버튼으로 처리.
-  $('#ttsGenBtn').onclick = async function () {
-    const audio = $('#ttsAudio')
-    const status = $('#ttsStatus')
-    if (!window._currentTtsText) { status.textContent = '먼저 블로그 글을 불러오세요.'; return }
-    // 이미 생성돼 있으면 그냥 재생
-    if (audio.src && audio.src.startsWith('blob:')) { audio.play(); status.textContent = '재생 중 🎵'; return }
-    this.disabled = true
-    const label = this.textContent
-    this.textContent = '⏳ 음성 생성 중…'
-    status.textContent = '음성 생성 중… 글이 길면 수십 초 걸릴 수 있어요.'
-    try {
-      const voice = $('#ttsVoice').value
-      const rate = parseFloat($('#ttsRate').value)
-      const body = JSON.stringify({ text: window._currentTtsText, voice, rate })
-      // 설정된 백엔드 → 실패(404 등) 시 영구 백엔드(fly.dev)로 fallback
-      const bases = [BASE, FALLBACK_BASE].filter((v, i, a) => v && a.indexOf(v) === i)
-      let res = null, lastErr = null
-      for (const b of bases) {
-        try {
-          const r = await fetch(`${b}/api/tts/generate`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
-          })
-          if (r.ok) { res = r; break }
-          lastErr = new Error('TTS 생성 실패 (' + r.status + ')')
-        } catch (e) { lastErr = e }
-      }
-      if (!res) throw lastErr || new Error('TTS 생성 실패')
-      const blob = await res.blob()
-      audio.src = URL.createObjectURL(blob)
-      await audio.play().catch(() => {})
-      status.textContent = '재생 중 🎵 (위 컨트롤로 일시정지/탐색 가능)'
-    } catch(err) {
-      status.textContent = '❌ 오디오 생성 오류: ' + err.message
-    } finally {
-      this.disabled = false
-      this.textContent = label
-    }
-  }
-
-  // 음성/배속 변경 시: 생성된 오디오 무효화 → 다시 생성하도록
-  const _resetTts = () => { const a = $('#ttsAudio'); a.pause(); a.removeAttribute('src'); a.load(); $('#ttsStatus').textContent = '설정 변경됨. ▶ 음성 생성하고 재생을 다시 누르세요.' }
-  $('#ttsVoice').onchange = _resetTts
-  $('#ttsRate').onchange = _resetTts
-  $('#ttsClose').onclick = () => { $('#ttsAudio').pause(); $('#ttsModal').close() }
 
   function escape(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
@@ -632,7 +554,7 @@
     })
   }
 
-  // ─── 잠금 화면 (비밀번호 2525) ─────────────────────────
+  // ─── 잠금 화면 ───────────────────────────────────────
   function setupLock() {
     const dlg = $('#lockScreen')
     const pwInput = $('#lockPw')
@@ -648,29 +570,12 @@
         pwInput.focus()
       }
     }
-    dlg.addEventListener('cancel', (e) => e.preventDefault())  // ESC로 안 닫히게
+    // ESC로 닫히지 않게
+    dlg.addEventListener('cancel', (e) => e.preventDefault())
     $('#lockBtn').onclick = tryUnlock
     pwInput.onkeydown = (e) => { if (e.key === 'Enter') tryUnlock() }
-    if (!dlg.open) dlg.showModal()
+    dlg.showModal()
     setTimeout(() => pwInput.focus(), 100)
-  }
-
-  // ─── 로그인 사용자 표시 ───
-  function updateUserBadge(user) {
-    const box = $('#userBadge')
-    if (!box) return
-    if (user) {
-      box.hidden = false
-      $('#userEmail').textContent = user.email || user.displayName || '로그인됨'
-    } else {
-      box.hidden = true
-    }
-  }
-  const _logoutBtn = $('#logoutBtn')
-  if (_logoutBtn) _logoutBtn.onclick = async () => {
-    await logout()
-    sessionStorage.removeItem('ytdlp_unlocked')
-    location.reload()
   }
 
   // ─── 관리자 모드 ─────────────────────────────────────
@@ -769,7 +674,7 @@
 
   $('#adminBtn').onclick = openAdminAuth
 
-  // 비밀번호(2525) 게이트로 복귀: 풀려 있으면 바로 시작, 아니면 잠금 화면.
+  // 시작: 잠금 상태면 잠금 화면, 풀려 있으면 앱 시작
   if (isUnlocked()) {
     startApp()
   } else {
@@ -835,12 +740,6 @@
   .btn-row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px }
   .btn-primary { padding:10px 20px; background:#059669; color:#fff; border:0; border-radius:8px; font-weight:600; cursor:pointer }
   .btn-primary:hover { background:#047857 }
-  .google-btn { padding:11px 16px; background:#fff; color:#1f2937; border:1px solid #cbd5e1; border-radius:10px; font-weight:600; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center }
-  .google-btn:hover { background:#f8fafc }
-  .user-badge { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#475569; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:2px 6px 2px 10px; max-width:240px }
-  .user-badge #userEmail { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px }
-  .user-badge #logoutBtn { font-size:11px; border:0; background:#e2e8f0; color:#334155; border-radius:999px; padding:3px 8px; cursor:pointer }
-  .user-badge #logoutBtn:hover { background:#cbd5e1 }
   #dCopyBlog { width:100%; margin:14px 0 6px; padding:12px; background:#7c3aed; color:#fff; border:0; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer }
   #dCopyBlog:hover { background:#6d28d9 }
   #dCopyBlog:disabled { opacity:.7; cursor:wait }
@@ -979,10 +878,10 @@
 <!-- 잠금 화면: 진입 비밀번호 입력 -->
 <dialog id="lockScreen" class="lock-dlg">
   <div class="lock-icon">🔒</div>
-  <h2 style="margin:6px 0 4px;font-size:18px">[JINI+US] 글로 보는 유튜브</h2>
+  <h2 style="margin:6px 0 4px;font-size:18px">잠긴 사이트</h2>
   <p style="font-size:13px;color:#64748b;margin:0 0 14px">비밀번호를 입력하세요</p>
   <input id="lockPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" />
-  <div id="lockError" class="lock-error" hidden style="margin-top:10px">❌ 비밀번호가 틀립니다</div>
+  <div id="lockError" class="lock-error" hidden>❌ 비밀번호가 틀립니다</div>
   <button id="lockBtn" type="button" class="btn-primary" style="width:100%;margin-top:10px">잠금 해제</button>
 </dialog>
 
@@ -1036,8 +935,7 @@
 <div class="wrap">
   <header>
     <h1>🎬 [JINI+US] 글로 보는 유튜브</h1>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <span id="userBadge" hidden class="user-badge"><span id="userEmail"></span><button id="logoutBtn" type="button">로그아웃</button></span>
+    <div style="display:flex;gap:6px;align-items:center">
       <a class="icon" href="/blog-studio.html" style="text-decoration:none"><button class="icon" type="button">📚 블로그 스튜디오</button></a>
       <button id="installBtn" class="icon" hidden type="button">📲 앱 설치</button>
       <button id="adminBtn" class="icon" type="button">🔐 관리자</button>
@@ -1118,29 +1016,6 @@
     <a id="dDownloadAll" class="btn-primary" style="padding:6px 12px;font-size:12px;text-decoration:none;display:none" download>📦 전체 ZIP 다운로드</a>
   </div>
   <ul id="dArtifacts"></ul>
-</dialog>
-
-<!-- TTS 모달 -->
-<dialog id="ttsModal" style="max-width:400px">
-  <div class="row"><strong style="font-size:16px">🔊 블로그 읽어주기</strong><button id="ttsClose" class="icon">닫기</button></div>
-  <div class="settings-form" style="margin-top:14px">
-    <div class="row2" style="align-items:center">
-      <label style="flex:1">음성</label>
-      <select id="ttsVoice" style="flex:2">
-        <option value="female">여성 (SunHi)</option>
-        <option value="male">남성 (InJoon)</option>
-      </select>
-    </div>
-    <div class="row2" style="align-items:center">
-      <label style="flex:1">배속 (<span id="ttsRateVal">1.0</span>x)</label>
-      <input type="range" id="ttsRate" min="1.0" max="3.0" step="0.1" value="1.0" style="flex:2" oninput="document.getElementById('ttsRateVal').textContent=this.value" />
-    </div>
-    <button id="ttsGenBtn" type="button" class="btn-primary" style="width:100%;margin-top:10px">▶ 음성 생성하고 재생</button>
-    <div style="margin-top:10px">
-      <audio id="ttsAudio" controls style="width:100%"></audio>
-    </div>
-    <div id="ttsStatus" class="hint" style="text-align:center;color:#7c3aed;font-weight:600"></div>
-  </div>
 </dialog>
 
 <!-- 설정 모달 -->

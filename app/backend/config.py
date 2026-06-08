@@ -20,8 +20,6 @@ SETTINGS_FILE = BASE_DIR / "runtime_settings.json"
 _LOCK = Lock()
 
 DEFAULT_DOWNLOAD_DIR = str(Path.home() / "yt-dlp-downloads")
-# 모듈 상수(routes/tts.py 등에서 import). 실제 경로 결정은 get_download_dir() 사용.
-DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", DEFAULT_DOWNLOAD_DIR)
 
 
 def _load_settings() -> dict[str, Any]:
