@@ -1,0 +1,4 @@
+# Netlify 응답 헤더
+# 구글 로그인 팝업이 opener와 통신할 수 있게 COOP을 완화(OAuth 팝업 허용).
+/*
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
