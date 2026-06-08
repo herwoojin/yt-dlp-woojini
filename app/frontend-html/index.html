@@ -67,8 +67,14 @@
   }
 
   async function ensureBase() {
-    // 사용자가 명시적으로 설정한 base가 있으면 그것을 우선
-    if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return }
+    // 사용자가 명시적으로 설정한 base가 있으면 그것을 우선 (단, 죽기 쉬운 터널 주소는 무시)
+    if (cfg.base && !cfg.base.includes('trycloudflare.com')) {
+      BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return
+    }
+    // 터널은 자주 죽으므로 항상 살아있는 영구 백엔드(fly.dev)를 기본으로 사용
+    BASE = FALLBACK_BASE; BASE_SOURCE = 'auto'
+    return
+    // eslint-disable-next-line no-unreachable
     const s = await checkRebuildState()
     if (s) {
       BASE = s.canonical.base
@@ -636,38 +642,27 @@
     })
   }
 
-  // ─── 잠금 화면 ───────────────────────────────────────
+  // ─── 로그인 화면 (구글 로그인 전용) ─────────────────────
+  let _lockBound = false
   function setupLock() {
     const dlg = $('#lockScreen')
-    const pwInput = $('#lockPw')
     const err = $('#lockError')
-    const tryUnlock = () => {
-      if (pwInput.value === getEntryPw()) {
-        sessionStorage.setItem('ytdlp_unlocked', '1')
-        dlg.close()
-        startApp()
-      } else {
-        err.hidden = false
-        pwInput.value = ''
-        pwInput.focus()
-      }
-    }
-    // ESC로 닫히지 않게
-    dlg.addEventListener('cancel', (e) => e.preventDefault())
-    $('#lockBtn').onclick = tryUnlock
-    pwInput.onkeydown = (e) => { if (e.key === 'Enter') tryUnlock() }
-    // 구글 로그인 (로그인 성공 시 onUser 콜백이 앱을 시작함)
-    $('#lockGoogleBtn').onclick = async () => {
-      err.hidden = true
-      try {
-        await loginWithGoogle()
-      } catch (e) {
-        err.hidden = false
-        err.textContent = '구글 로그인 실패: ' + (e && e.message ? e.message : e)
+    if (!_lockBound) {
+      _lockBound = true
+      dlg.addEventListener('cancel', (e) => e.preventDefault())  // ESC로 안 닫히게
+      $('#lockGoogleBtn').onclick = async () => {
+        err.hidden = true
+        $('#lockGoogleBtn').disabled = true
+        try {
+          await loginWithGoogle()  // 리디렉트 → 돌아오면 onUser가 앱 시작
+        } catch (e) {
+          err.hidden = false
+          err.textContent = '구글 로그인 실패: ' + (e && e.message ? e.message : e)
+          $('#lockGoogleBtn').disabled = false
+        }
       }
     }
     if (!dlg.open) dlg.showModal()
-    setTimeout(() => pwInput.focus(), 100)
   }
 
   // ─── 로그인 사용자 표시 ───
@@ -787,9 +782,11 @@
   // Firebase 로그인 상태 우선: 로그인돼 있으면 비밀번호 없이 바로 앱 시작(각자 즉시 사용).
   let __appStarted = false
   const _startOnce = () => { if (!__appStarted) { __appStarted = true; startApp() } }
+  // 로그인이 진짜 게이트: Firebase 사용자가 있어야 앱 시작(없으면 로그인 화면 유지).
+  // (백엔드 격리가 켜져 있어 토큰 없이는 401이 나므로 sessionStorage 기반 자동시작은 사용 안 함)
+  setupLock()
   onUser((user) => {
     updateUserBadge(user)
-    // 로그인 사용자(uid)에 맞는 Gemini 키로 갱신 + 키 경고 재평가
     GEMINI_KEY = getGeminiKey()
     maybeShowKeyWarning()
     if (user) {
@@ -797,14 +794,8 @@
       const dlg = $('#lockScreen'); if (dlg && dlg.open) dlg.close()
       _startOnce()
     }
+    // user 없으면 로그인 화면(setupLock) 그대로 유지
   })
-
-  // 시작: 잠금 상태면 잠금 화면, 풀려 있으면 앱 시작
-  if (isUnlocked()) {
-    _startOnce()
-  } else {
-    setupLock()
-  }
 </script>
 <style>
   :root { color-scheme: light; }
@@ -1015,12 +1006,7 @@
     <svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:middle;margin-right:8px"><path fill="#FFC107" d="M43.6 20.5h-1.9V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-2.1 14.1-5.5l-6.5-5.5C29.6 34.5 26.9 35.5 24 35.5c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.5l6.5 5.5C40.9 36.7 44 31 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
     Google로 로그인
   </button>
-  <div id="lockError" class="lock-error" hidden style="margin-top:10px">❌ 비밀번호가 틀립니다</div>
-  <details style="margin-top:14px">
-    <summary style="font-size:12px;color:#94a3b8;cursor:pointer">비밀번호로 입장(임시)</summary>
-    <input id="lockPw" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" style="margin-top:8px" />
-    <button id="lockBtn" type="button" class="btn-secondary" style="width:100%;margin-top:8px">잠금 해제</button>
-  </details>
+  <div id="lockError" class="lock-error" hidden style="margin-top:10px"></div>
 </dialog>
 
 <!-- 관리자 인증 -->
