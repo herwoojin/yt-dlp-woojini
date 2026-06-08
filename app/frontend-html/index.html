@@ -170,10 +170,11 @@
     settingsModal.showModal()
   }
   $('#cfgClose').onclick = () => { settingsModal.close(); startRefreshLoop() }
-  $('#cfgSave').onclick = () => {
-    // 백엔드 주소는 공용(브라우저 단위), Gemini 키는 로그인 사용자(uid)별로 저장
+  $('#cfgSave').onclick = async () => {
+    // 백엔드 주소는 공용(브라우저 단위), Gemini 키는 계정(uid)별 — Firestore에도 저장(기기 간 동기화)
     localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: $('#cfgBase').value.trim().replace(/\/$/, '') }))
-    setGeminiKey($('#cfgGeminiKey').value.trim())
+    $('#cfgSave').disabled = true
+    await setGeminiKey($('#cfgGeminiKey').value.trim())  // Firestore 저장 완료까지 대기 후 새로고침
     GEMINI_KEY = getGeminiKey()
     settingsModal.close()
     location.reload()

@@ -101,9 +101,10 @@
     settingsModal.showModal()
   }
   $('#cfgClose').onclick = () => settingsModal.close()
-  $('#cfgSave').onclick = () => {
+  $('#cfgSave').onclick = async () => {
     localStorage.setItem('ytdlp_cfg', JSON.stringify({ base: $('#cfgBase').value.trim().replace(/\/$/, '') }))
-    setGeminiKey($('#cfgGeminiKey').value.trim())
+    $('#cfgSave').disabled = true
+    await setGeminiKey($('#cfgGeminiKey').value.trim())
     settingsModal.close()
     location.reload()
   }
