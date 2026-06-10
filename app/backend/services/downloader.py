@@ -24,10 +24,6 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, li
 
 
 def _base_opts() -> dict[str, Any]:
-    # YouTube 403(데이터센터 IP 차단) 우회: web 대신 tv/ios 등 다른 player_client 사용.
-    # 환경변수 YT_DLP_PLAYER_CLIENTS 로 조정 가능(쉼표구분).
-    player_clients = [c.strip() for c in os.getenv(
-        "YT_DLP_PLAYER_CLIENTS", "tv,ios,web_safari,web").split(",") if c.strip()]
     opts: dict[str, Any] = {
         "noplaylist": True,
         "quiet": True,
@@ -36,11 +32,15 @@ def _base_opts() -> dict[str, Any]:
         "fragment_retries": 5,
         "extractor_retries": 3,
         "http_headers": {"User-Agent": UA},
-        "extractor_args": {"youtube": {"player_client": player_clients}},
         # VPN/보안 프록시가 HTTPS를 가로채(self-signed cert) 인증서 검증이 실패하는 환경 대응.
         # 환경변수 YT_DLP_NO_CHECK_CERT=0 으로 끌 수 있음.
         "nocheckcertificate": os.getenv("YT_DLP_NO_CHECK_CERT", "1") != "0",
     }
+    # player_client는 강제하지 않는다(기본값이 정상 포맷을 줌). 강제하면 일부 영상이
+    # 'DRM protected'/'No video formats'로 잘못 나옴. 필요 시 YT_DLP_PLAYER_CLIENTS로만 지정.
+    player_clients = [c.strip() for c in os.getenv("YT_DLP_PLAYER_CLIENTS", "").split(",") if c.strip()]
+    if player_clients:
+        opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
     cookies = os.getenv("YT_DLP_COOKIES_FILE")
     if cookies and os.path.exists(cookies):
         opts["cookiefile"] = cookies
