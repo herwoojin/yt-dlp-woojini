@@ -24,6 +24,10 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, li
 
 
 def _base_opts() -> dict[str, Any]:
+    # YouTube 403(데이터센터 IP 차단) 우회: web 대신 tv/ios 등 다른 player_client 사용.
+    # 환경변수 YT_DLP_PLAYER_CLIENTS 로 조정 가능(쉼표구분).
+    player_clients = [c.strip() for c in os.getenv(
+        "YT_DLP_PLAYER_CLIENTS", "tv,ios,web_safari,web").split(",") if c.strip()]
     opts: dict[str, Any] = {
         "noplaylist": True,
         "quiet": True,
@@ -32,10 +36,18 @@ def _base_opts() -> dict[str, Any]:
         "fragment_retries": 5,
         "extractor_retries": 3,
         "http_headers": {"User-Agent": UA},
+        "extractor_args": {"youtube": {"player_client": player_clients}},
+        # VPN/보안 프록시가 HTTPS를 가로채(self-signed cert) 인증서 검증이 실패하는 환경 대응.
+        # 환경변수 YT_DLP_NO_CHECK_CERT=0 으로 끌 수 있음.
+        "nocheckcertificate": os.getenv("YT_DLP_NO_CHECK_CERT", "1") != "0",
     }
     cookies = os.getenv("YT_DLP_COOKIES_FILE")
     if cookies and os.path.exists(cookies):
         opts["cookiefile"] = cookies
+    # 거주용(residential) 프록시: fly.dev 데이터센터 IP 차단 우회. 예: http://user:pass@host:port
+    proxy = os.getenv("YT_DLP_PROXY")
+    if proxy:
+        opts["proxy"] = proxy
     return opts
 
 
