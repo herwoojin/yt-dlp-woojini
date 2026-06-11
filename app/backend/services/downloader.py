@@ -40,7 +40,11 @@ def _base_opts() -> dict[str, Any]:
     # 'DRM protected'/'No video formats'로 잘못 나옴. 필요 시 YT_DLP_PLAYER_CLIENTS로만 지정.
     player_clients = [c.strip() for c in os.getenv("YT_DLP_PLAYER_CLIENTS", "").split(",") if c.strip()]
     if player_clients:
-        opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
+        opts.setdefault("extractor_args", {})["youtube"] = {"player_client": player_clients}
+    # bgutil PO 토큰 HTTP 프로바이더 사용(봇차단 우회). YT_DLP_POT_BASE_URL=http://127.0.0.1:4416
+    pot_base = os.getenv("YT_DLP_POT_BASE_URL")
+    if pot_base:
+        opts.setdefault("extractor_args", {})["youtubepot-bgutilhttp"] = {"base_url": [pot_base]}
     cookies = os.getenv("YT_DLP_COOKIES_FILE")
     if cookies and os.path.exists(cookies):
         opts["cookiefile"] = cookies
