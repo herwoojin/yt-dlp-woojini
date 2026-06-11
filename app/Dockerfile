@@ -2,13 +2,21 @@
 # Build context: app/ (Dockerfile lives at app/Dockerfile)
 FROM python:3.12-slim
 
-# 시스템 의존성: ffmpeg (yt-dlp 후처리), curl (healthcheck), tini (init)
+# 시스템 의존성: ffmpeg (yt-dlp 후처리), curl, tini (init), unzip (deno 설치)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
         ca-certificates \
         tini \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# JS 런타임(Deno): yt-dlp가 YouTube n-challenge(JS 서명)·PO 토큰을 푸는 데 필요.
+RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip \
+    && unzip -o /tmp/deno.zip -d /usr/local/bin \
+    && rm /tmp/deno.zip \
+    && chmod +x /usr/local/bin/deno \
+    && /usr/local/bin/deno --version
 
 WORKDIR /app
 

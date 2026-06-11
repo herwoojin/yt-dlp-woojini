@@ -12,6 +12,8 @@ primary_region = "nrt"  # Tokyo: 한국에서 가장 가까운 region
   ALLOW_INSECURE_AUTH = "true"
   TELEGRAM_ENABLED = "false"
   DOWNLOAD_DIR = "/data/downloads"
+  # YouTube 봇차단 우회 쿠키(볼륨). 파일 있으면 yt-dlp가 사용.
+  YT_DLP_COOKIES_FILE = "/data/cookies.txt"
   # CORS: 25y.netlify.app과 모든 netlify deploy preview 허용 (regex)
   ALLOWED_ORIGINS = "https://25y.netlify.app"
   # ALLOWED_ORIGIN_REGEX는 코드 기본값(*.netlify.app | *.trycloudflare.com) 그대로 사용
