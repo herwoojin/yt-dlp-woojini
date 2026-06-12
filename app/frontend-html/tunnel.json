@@ -1,4 +1,6 @@
 {
-  "base": "https://football-president-notification-regards.trycloudflare.com",
-  "updated": "2026-06-11T21:13:02Z"
+  "base": "https://heoujin-ui-macbookair-8.tail43923a.ts.net",
+  "updated": "2026-06-12T00:00:00Z",
+  "provider": "tailscale-funnel",
+  "note": "고정 URL — 절대 안 바뀜. cloudflared quick tunnel 폐기됨."
 }

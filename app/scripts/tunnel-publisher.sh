@@ -68,35 +68,30 @@ watcher() {
   done
 }
 
-# Healthcheck: periodically curl the currently-published URL from outside.
-# If it fails HEALTH_FAIL_THRESHOLD times in a row, kill cloudflared so launchd
-# restarts the whole script (and a fresh URL gets allocated).
+# Healthcheck (메트릭 기반): 맥은 자기 터널 URL을 curl 못 하므로(hairpin),
+# cloudflared의 로컬 메트릭 포트로 활성 edge 연결 수를 확인한다. 연결이 0이면
+# (프로세스는 살아있지만 터널이 죽은 "좀비") cloudflared를 죽여 새 터널을 받는다.
+METRICS_PORT=20241
 healthcheck() {
   local fail_streak=0
-  while sleep "$HEALTH_INTERVAL"; do
-    [ -f "$URL_FILE" ] || continue
+  while sleep 30; do
     local published_at=0
     [ -f /tmp/ytdlp-tunnel-published-at ] && published_at=$(cat /tmp/ytdlp-tunnel-published-at)
-    local now elapsed
-    now=$(date +%s)
-    elapsed=$(( now - published_at ))
-    if [ "$elapsed" -lt "$HEALTH_GRACE" ]; then
-      # Fresh publish — skip checks during grace window
-      continue
+    if [ $(( $(date +%s) - published_at )) -lt "$HEALTH_GRACE" ]; then
+      continue   # 새 발급 직후 grace
     fi
-    local url
-    url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$URL_FILE" | head -1)
-    [ -z "$url" ] && continue
-
-    if curl -fsS -o /dev/null --max-time 10 "$url/health" 2>/dev/null; then
+    local conns
+    conns=$(curl -fsS --max-time 5 "http://127.0.0.1:${METRICS_PORT}/metrics" 2>/dev/null \
+            | grep -E '^cloudflared_tunnel_ha_connections ' | awk '{print $2}' | head -1)
+    conns=${conns%%.*}
+    if [ "${conns:-0}" -ge 1 ] 2>/dev/null; then
       fail_streak=0
     else
       fail_streak=$(( fail_streak + 1 ))
-      log "health check fail #$fail_streak for $url"
+      log "tunnel edge connections=${conns:-0} (fail #$fail_streak)"
       if [ "$fail_streak" -ge "$HEALTH_FAIL_THRESHOLD" ]; then
-        log "URL dead $fail_streak times — killing cloudflared to force fresh tunnel"
-        pkill -f "cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000" 2>/dev/null
-        # cloudflared exit will cause the main script to exit, launchd restarts everything
+        log "tunnel dead (no edge connections) — restarting cloudflared for fresh URL"
+        pkill -f "cloudflared tunnel --no-autoupdate" 2>/dev/null
         return
       fi
     fi
