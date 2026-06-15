@@ -68,3 +68,6 @@ def root():
 def blog_studio():
     page = FRONTEND_DIR / "blog-studio.html"
     return HTMLResponse(page.read_text(encoding="utf-8"))
+
+# Catch-all for static files (manifest.webmanifest, icon.svg, sw.js, etc.)
+app.mount("/", StaticFiles(directory=FRONTEND_DIR), name="static")

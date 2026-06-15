@@ -330,12 +330,26 @@ class JobRegistry:
         if self.is_cancelled(job_id):
             return
         await self._update(job_id, status=JobStatus.DOWNLOADING, progress=0.05, message="영상 다운로드 중")
-        info = await asyncio.to_thread(
-            downloader.download,
-            job.url,
-            jdir,
-            video_format=job.video_format,
-        )
+        try:
+            info = await asyncio.to_thread(
+                downloader.download,
+                job.url,
+                jdir,
+                video_format=job.video_format,
+            )
+        except Exception as exc:
+            msg = "영상 다운로드에 실패했습니다."
+            exc_str = str(exc).lower()
+            if "drm" in exc_str:
+                msg = "이 영상은 DRM으로 보호된 유료/저작권 영상이라 다운로드할 수 없습니다."
+            elif "sign in" in exc_str or "members-only" in exc_str:
+                msg = "이 영상은 로그인이 필요하거나 회원 전용 영상이라 다운로드할 수 없습니다."
+            elif "private" in exc_str:
+                msg = "이 영상은 비공개 영상이라 다운로드할 수 없습니다."
+            
+            log.warning("video download failed for job %s: %s", job_id, exc)
+            await self._update(job_id, status=JobStatus.FAILED, message=msg, error=traceback.format_exc())
+            return
         artifacts: list[JobArtifact] = []
         for kind, path in info["files"].items():
             p = Path(path)
@@ -363,6 +377,26 @@ class JobRegistry:
         artifacts.append(JobArtifact(kind="transcript_txt", filename=t_path.name, size_bytes=t_path.stat().st_size))
 
         has_transcript = bool(transcript_text) and not transcript_text.startswith("[")
+
+        # 2b) 자막을 못 받았으면(429/자막없음) 영상 음성을 맥에서 직접 받아쓰기(Whisper) 폴백.
+        # 이미 받은 video.mp4를 이용하므로 YouTube 자막 의존이 사라진다.
+        if not has_transcript:
+            video_path = self._find_video(jdir)
+            if video_path:
+                await self._update(
+                    job_id,
+                    status=JobStatus.TRANSCRIBING,
+                    progress=0.45,
+                    message="자막이 없어 음성 인식(Whisper)으로 자막 생성 중... (수십 초~수 분)",
+                    artifacts=artifacts,
+                )
+                vtt = await asyncio.to_thread(transcript.transcribe_to_vtt, video_path, jdir)
+                if vtt:
+                    info.setdefault("files", {})["subtitle"] = str(vtt)
+                    transcript_text = await asyncio.to_thread(transcript.build_transcript_txt, jdir, info)
+                    has_transcript = bool(transcript_text) and not transcript_text.startswith("[")
+                    if has_transcript:
+                        log.info("whisper 폴백으로 자막 확보 — 블로그 생성 계속")
 
         # 3) Gemini outputs (skip gracefully if no transcript)
         if not has_transcript:
@@ -508,15 +542,25 @@ class JobRegistry:
                 blog_timestamps,
                 jdir,
             )
-            # Replace img src in blog HTML with API-accessible paths
+            # Replace img src in blog HTML with self-contained base64 data URIs
+            # so the blog HTML renders everywhere (텔레그램 다운로드/Tistory 붙여넣기/웹)
+            # without depending on the backend /api/files origin being reachable.
+            import base64
+
             for img in captured:
+                fpath = jdir / img["filename"]
                 old_src = f'blog_img_{img["index"]}.jpg'
-                new_src = f'/api/files/{job_id}/{img["filename"]}'
+                try:
+                    b64 = base64.b64encode(fpath.read_bytes()).decode("ascii")
+                    new_src = f"data:image/jpeg;base64,{b64}"
+                except Exception as exc:
+                    log.warning("base64 embed failed for %s: %s", img["filename"], exc)
+                    new_src = f'/api/files/{job_id}/{img["filename"]}'
                 blog_html = blog_html.replace(old_src, new_src)
                 artifacts.append(JobArtifact(
                     kind="blog_image",
                     filename=img["filename"],
-                    size_bytes=Path(jdir / img["filename"]).stat().st_size,
+                    size_bytes=fpath.stat().st_size,
                 ))
             log.info("captured %d/%d blog images", len(captured), len(blog_timestamps))
 

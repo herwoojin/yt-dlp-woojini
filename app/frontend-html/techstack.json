@@ -2,131 +2,315 @@
   "project": "yt-dlp 25y webapp",
   "description": "YouTube 영상 다운로드 + Gemini 기반 요약/목차/HTML 산출물 생성. 모바일 PWA 지원, fly.io 영구 백엔드.",
   "repo": "https://github.com/herwoojin/yt-dlp-woojini",
-  "lastUpdated": "2026-05-26",
+  "lastUpdated": "2026-06-15",
   "architectureSummary": "정적 프론트엔드(Netlify) ↔ HTTPS ↔ FastAPI 백엔드(Fly.io). 프론트는 GitHub raw + Netlify CDN의 tunnel.json을 비교해 백엔드 URL을 자동 발견하며, 리빌드 진행 상태도 UI에 표시.",
   "categories": [
     {
       "name": "프론트엔드",
       "items": [
-        {"name": "Vanilla JavaScript (ES modules)", "purpose": "단일 HTML 파일 내 모듈 스크립트. 빌드 도구 없음."},
-        {"name": "HTML5 + CSS3", "purpose": "단일 index.html, native <dialog>, 인라인 스타일."},
-        {"name": "PWA — Web App Manifest", "purpose": "manifest.webmanifest + icon.svg. 홈 화면 설치 가능 (Android/iOS/Desktop)."},
-        {"name": "PWA — Service Worker", "purpose": "sw.js. 정적 셸 캐시 (API는 캐시 제외). 설치 자격 충족."},
-        {"name": "Web APIs", "purpose": "Fetch, sessionStorage (잠금 세션), localStorage (비밀번호/설정), beforeinstallprompt, matchMedia, Page Visibility."}
+        {
+          "name": "Vanilla JavaScript (ES modules)",
+          "purpose": "단일 HTML 파일 내 모듈 스크립트. 빌드 도구 없음."
+        },
+        {
+          "name": "HTML5 + CSS3",
+          "purpose": "단일 index.html, native <dialog>, 인라인 스타일."
+        },
+        {
+          "name": "PWA — Web App Manifest",
+          "purpose": "manifest.webmanifest + icon.svg. 홈 화면 설치 가능 (Android/iOS/Desktop)."
+        },
+        {
+          "name": "PWA — Service Worker",
+          "purpose": "sw.js. 정적 셸 캐시 (API는 캐시 제외). 설치 자격 충족."
+        },
+        {
+          "name": "Web APIs",
+          "purpose": "Fetch, sessionStorage (잠금 세션), localStorage (비밀번호/설정), beforeinstallprompt, matchMedia, Page Visibility."
+        }
       ]
     },
     {
       "name": "프론트엔드 호스팅",
       "items": [
-        {"name": "Netlify", "purpose": "정적 사이트 호스팅. https://25y.netlify.app", "config": "리포 루트 netlify.toml — publish=app/frontend-html, SPA redirect /*→/index.html"},
-        {"name": "자동 리빌드", "purpose": "GitHub 푸시 → Netlify webhook → 빌드 → CDN 배포 (~1-2분)"}
+        {
+          "name": "Netlify",
+          "purpose": "정적 사이트 호스팅. https://25y.netlify.app",
+          "config": "리포 루트 netlify.toml — publish=app/frontend-html, SPA redirect /*→/index.html"
+        },
+        {
+          "name": "자동 리빌드",
+          "purpose": "GitHub 푸시 → Netlify webhook → 빌드 → CDN 배포 (~1-2분)"
+        }
       ]
     },
     {
       "name": "백엔드 — 언어/프레임워크",
       "items": [
-        {"name": "Python 3.12-slim", "purpose": "런타임 (Docker base image)"},
-        {"name": "FastAPI ≥0.115", "purpose": "HTTP API 프레임워크 (CORSMiddleware 포함)"},
-        {"name": "uvicorn[standard] ≥0.30", "purpose": "ASGI 서버, 단일 worker로 실행"},
-        {"name": "Pydantic ≥2.7", "purpose": "JobInfo / JobCreateRequest 등 스키마"},
-        {"name": "asyncio", "purpose": "단일 worker 큐로 job 순차 처리 (디스크/Gemini 쿼터 보호)"}
+        {
+          "name": "Python 3.12-slim",
+          "purpose": "런타임 (Docker base image)"
+        },
+        {
+          "name": "FastAPI ≥0.115",
+          "purpose": "HTTP API 프레임워크 (CORSMiddleware 포함)"
+        },
+        {
+          "name": "uvicorn[standard] ≥0.30",
+          "purpose": "ASGI 서버, 단일 worker로 실행"
+        },
+        {
+          "name": "Pydantic ≥2.7",
+          "purpose": "JobInfo / JobCreateRequest 등 스키마"
+        },
+        {
+          "name": "asyncio",
+          "purpose": "단일 worker 큐로 job 순차 처리 (디스크/Gemini 쿼터 보호)"
+        }
       ]
     },
     {
       "name": "백엔드 — 핵심 라이브러리",
       "items": [
-        {"name": "yt-dlp ≥2024.10.7", "purpose": "YouTube 영상/자막/메타데이터 다운로드"},
-        {"name": "google-genai ≥0.3", "purpose": "Gemini 호출 (chapters/summary/email/blog HTML 생성)"},
-        {"name": "python-dotenv", "purpose": ".env 로드 (로컬 개발용)"},
-        {"name": "firebase-admin ≥6.5", "purpose": "ID 토큰 검증 (현재 ALLOW_INSECURE_AUTH=true로 우회 중)"},
-        {"name": "pyTelegramBotAPI ≥4.20", "purpose": "Telegram bot 통합 (현재 TELEGRAM_ENABLED=false)"}
+        {
+          "name": "yt-dlp ≥2024.10.7",
+          "purpose": "YouTube 영상/자막/메타데이터 다운로드"
+        },
+        {
+          "name": "google-genai ≥0.3",
+          "purpose": "Gemini 호출 (chapters/summary/email/blog HTML 생성)"
+        },
+        {
+          "name": "python-dotenv",
+          "purpose": ".env 로드 (로컬 개발용)"
+        },
+        {
+          "name": "firebase-admin ≥6.5",
+          "purpose": "ID 토큰 검증 (현재 ALLOW_INSECURE_AUTH=true로 우회 중)"
+        },
+        {
+          "name": "pyTelegramBotAPI ≥4.20",
+          "purpose": "Telegram bot 통합 (현재 TELEGRAM_ENABLED=false)"
+        },
+        {
+          "name": "mlx-whisper ≥0.4",
+          "purpose": "YouTube 자막을 못 받을 때(429/자막없음) 영상 음성을 맥(M4 GPU)에서 직접 받아써서 자막 생성하는 폴백. 모델 whisper-large-v3-turbo."
+        }
       ]
     },
     {
       "name": "백엔드 — 시스템 의존성",
       "items": [
-        {"name": "ffmpeg", "purpose": "yt-dlp 영상 후처리 (병합/포맷변환)"},
-        {"name": "tini", "purpose": "PID 1 신호 전파 (컨테이너 graceful shutdown)"},
-        {"name": "curl + ca-certificates", "purpose": "이미지 내 헬스체크 및 외부 호출용"}
+        {
+          "name": "ffmpeg",
+          "purpose": "yt-dlp 영상 후처리 (병합/포맷변환)"
+        },
+        {
+          "name": "tini",
+          "purpose": "PID 1 신호 전파 (컨테이너 graceful shutdown)"
+        },
+        {
+          "name": "curl + ca-certificates",
+          "purpose": "이미지 내 헬스체크 및 외부 호출용"
+        }
       ]
     },
     {
       "name": "백엔드 호스팅",
       "items": [
-        {"name": "Fly.io", "purpose": "https://ytdlp-25y.fly.dev. region=nrt(도쿄), shared-cpu-1x, 1024MB RAM"},
-        {"name": "자동 정지/기동", "purpose": "auto_stop_machines=stop, min_machines_running=0 — idle 시 정지, 요청 시 ~3초 cold start (무료 한도 보호)"},
-        {"name": "영구 볼륨", "purpose": "ytdlp_data 볼륨 3GB → /data에 마운트. DOWNLOAD_DIR=/data/downloads"},
-        {"name": "HTTP 헬스체크", "purpose": "GET /health 30s 간격"}
+        {
+          "name": "Fly.io",
+          "purpose": "https://ytdlp-25y.fly.dev. region=nrt(도쿄), shared-cpu-1x, 1024MB RAM"
+        },
+        {
+          "name": "자동 정지/기동",
+          "purpose": "auto_stop_machines=stop, min_machines_running=0 — idle 시 정지, 요청 시 ~3초 cold start (무료 한도 보호)"
+        },
+        {
+          "name": "영구 볼륨",
+          "purpose": "ytdlp_data 볼륨 3GB → /data에 마운트. DOWNLOAD_DIR=/data/downloads"
+        },
+        {
+          "name": "HTTP 헬스체크",
+          "purpose": "GET /health 30s 간격"
+        }
       ]
     },
     {
       "name": "컨테이너 / 빌드",
       "items": [
-        {"name": "Docker", "purpose": "app/Dockerfile. multi-stage 미사용 (단순)"},
-        {"name": "Depot builder (Fly)", "purpose": "원격 이미지 빌드. 로컬 Docker 불필요"},
-        {"name": "이미지 크기", "purpose": "약 235MB (ffmpeg 포함)"}
+        {
+          "name": "Docker",
+          "purpose": "app/Dockerfile. multi-stage 미사용 (단순)"
+        },
+        {
+          "name": "Depot builder (Fly)",
+          "purpose": "원격 이미지 빌드. 로컬 Docker 불필요"
+        },
+        {
+          "name": "이미지 크기",
+          "purpose": "약 235MB (ffmpeg 포함)"
+        }
+      ]
+    },
+    {
+      "name": "Mac 백엔드 접속 (고정 URL)",
+      "items": [
+        {
+          "name": "Tailscale Funnel",
+          "purpose": "맥(가정용 IP, 다운로드 처리)을 고정 공개 URL(*.ts.net)로 노출. 재시작마다 URL이 바뀌던 cloudflare quick tunnel을 대체. tailscaled는 root LaunchDaemon으로 부팅 자동시작."
+        },
+        {
+          "name": "텔레그램 봇 (주 전송 경로)",
+          "purpose": "공개 URL/터널/VPN 무관하게 outbound 폴링으로 동작. 모바일에서 유튜브 URL 전송 → 맥 다운로드+블로그 생성 → blog_long.html(base64 이미지 내장)을 채팅으로 전송. 자연어 명령(살아있어?/재시작/도움) 지원."
+        }
       ]
     },
     {
       "name": "AI / 외부 API",
       "items": [
-        {"name": "Google Gemini Flash (gemini-2.5-flash)", "purpose": "기본 모델 — 빠른 요약/목차"},
-        {"name": "Google Gemini Pro (gemini-2.5-pro)", "purpose": "고품질 모델 — 사용자가 'pro' 선택 시"},
-        {"name": "API 키 처리", "purpose": "프론트가 X-Gemini-Key 헤더로 사용자 키 전달 → 백엔드는 throwaway client로 호출 (서버 저장 안 함)"}
+        {
+          "name": "Google Gemini Flash (gemini-2.5-flash)",
+          "purpose": "기본 모델 — 빠른 요약/목차"
+        },
+        {
+          "name": "Google Gemini Pro (gemini-2.5-pro)",
+          "purpose": "고품질 모델 — 사용자가 'pro' 선택 시"
+        },
+        {
+          "name": "API 키 처리",
+          "purpose": "프론트가 X-Gemini-Key 헤더로 사용자 키 전달 → 백엔드는 throwaway client로 호출 (서버 저장 안 함)"
+        }
       ]
     },
     {
       "name": "인증 / 접근 제어",
       "items": [
-        {"name": "사이트 잠금 (클라이언트)", "purpose": "진입 시 비밀번호 모달. localStorage(ytdlp_entry_pw)에 저장, 기본 2525"},
-        {"name": "관리자 모드 (클라이언트)", "purpose": "별도 비밀번호로 진입 비밀번호 변경 가능. localStorage(ytdlp_admin_pw), 기본 2525"},
-        {"name": "세션 잠금 해제", "purpose": "sessionStorage 플래그 — 같은 탭에서 재입력 없음"},
-        {"name": "백엔드 인증", "purpose": "ALLOW_INSECURE_AUTH=true (사실상 무인증). Firebase ID 토큰 검증 코드는 존재하나 비활성"}
+        {
+          "name": "사이트 잠금 (클라이언트)",
+          "purpose": "진입 시 비밀번호 모달. localStorage(ytdlp_entry_pw)에 저장, 기본 2525"
+        },
+        {
+          "name": "관리자 모드 (클라이언트)",
+          "purpose": "별도 비밀번호로 진입 비밀번호 변경 가능. localStorage(ytdlp_admin_pw), 기본 2525"
+        },
+        {
+          "name": "세션 잠금 해제",
+          "purpose": "sessionStorage 플래그 — 같은 탭에서 재입력 없음"
+        },
+        {
+          "name": "백엔드 인증",
+          "purpose": "ALLOW_INSECURE_AUTH=true (사실상 무인증). Firebase ID 토큰 검증 코드는 존재하나 비활성"
+        }
       ]
     },
     {
       "name": "CORS",
       "items": [
-        {"name": "FastAPI CORSMiddleware", "purpose": "allow_origin_regex로 *.netlify.app + *.trycloudflare.com 전체 허용"},
-        {"name": "CORS allow_credentials", "purpose": "false (쿠키 미사용)"}
+        {
+          "name": "FastAPI CORSMiddleware",
+          "purpose": "allow_origin_regex로 *.netlify.app + *.trycloudflare.com 전체 허용"
+        },
+        {
+          "name": "CORS allow_credentials",
+          "purpose": "false (쿠키 미사용)"
+        }
       ]
     },
     {
       "name": "백엔드 URL 자동 발견 (이중 소스)",
       "items": [
-        {"name": "tunnel.json (Netlify)", "purpose": "/tunnel.json — CDN 캐시, 리빌드 완료 후 갱신"},
-        {"name": "tunnel.json (GitHub raw)", "purpose": "raw.githubusercontent.com — push 즉시 반영, 'source of truth'"},
-        {"name": "리빌드 진행 배너", "purpose": "두 소스 비교 → 다르면 'Netlify 리빌드 진행 중' 표시 + GitHub URL 즉시 사용"}
+        {
+          "name": "tunnel.json (Netlify)",
+          "purpose": "/tunnel.json — CDN 캐시, 리빌드 완료 후 갱신"
+        },
+        {
+          "name": "tunnel.json (GitHub raw)",
+          "purpose": "raw.githubusercontent.com — push 즉시 반영, 'source of truth'"
+        },
+        {
+          "name": "리빌드 진행 배너",
+          "purpose": "두 소스 비교 → 다르면 'Netlify 리빌드 진행 중' 표시 + GitHub URL 즉시 사용"
+        }
       ]
     },
     {
       "name": "산출물 / 파일 처리",
       "items": [
-        {"name": "video.mp4 / video.ko.vtt / video.info.json", "purpose": "yt-dlp 원본 출력"},
-        {"name": "transcript.txt", "purpose": "VTT 파싱 → 평문 + transcript_timed.txt (Gemini용)"},
-        {"name": "chapters.json", "purpose": "Gemini 생성 시계열 목차"},
-        {"name": "summary_short.html / email_readable.html / blog_long.html", "purpose": "Gemini 생성, _wrap_html()로 <meta charset=utf-8>+스타일 포함 완전한 문서로 저장"},
-        {"name": "/api/files/{id}/preview/{filename}", "purpose": "inline 응답 — 브라우저에서 바로 보기"},
-        {"name": "/api/files/{id}/_archive.zip", "purpose": "전체 산출물 ZIP, 파일명 = {제목}_{오늘날짜}.zip"},
-        {"name": "DELETE /api/jobs/{id}", "purpose": "완료/실패 작업 + 디렉터리 영구 삭제 (볼륨 공간 회수)"}
+        {
+          "name": "video.mp4 / video.ko.vtt / video.info.json",
+          "purpose": "yt-dlp 원본 출력"
+        },
+        {
+          "name": "transcript.txt",
+          "purpose": "VTT 파싱 → 평문 + transcript_timed.txt (Gemini용)"
+        },
+        {
+          "name": "chapters.json",
+          "purpose": "Gemini 생성 시계열 목차"
+        },
+        {
+          "name": "summary_short.html / email_readable.html / blog_long.html",
+          "purpose": "Gemini 생성, _wrap_html()로 <meta charset=utf-8>+스타일 포함 완전한 문서로 저장"
+        },
+        {
+          "name": "/api/files/{id}/preview/{filename}",
+          "purpose": "inline 응답 — 브라우저에서 바로 보기"
+        },
+        {
+          "name": "/api/files/{id}/_archive.zip",
+          "purpose": "전체 산출물 ZIP, 파일명 = {제목}_{오늘날짜}.zip"
+        },
+        {
+          "name": "DELETE /api/jobs/{id}",
+          "purpose": "완료/실패 작업 + 디렉터리 영구 삭제 (볼륨 공간 회수)"
+        },
+        {
+          "name": "blog_long.html (self-contained)",
+          "purpose": "블로그 이미지를 base64 data URI로 HTML에 직접 내장 → 서버(/api/files) 없이도 폰·Tistory·웹 어디서나 이미지 표시."
+        }
       ]
     },
     {
       "name": "개발 / 배포 파이프라인",
       "items": [
-        {"name": "Git (GitHub)", "purpose": "단일 리포 herwoojin/yt-dlp-woojini, master 브랜치 직접 푸시"},
-        {"name": "Netlify 배포", "purpose": "git push → 자동 빌드/배포 (1~2분)"},
-        {"name": "Fly 배포", "purpose": "수동 `cd app && fly deploy` (이미지 빌드 + push + 무중단 롤링)"},
-        {"name": "app/scripts/deploy-to-fly.sh", "purpose": "최초 셋업용 멱등 스크립트 (앱 생성/볼륨/배포)"},
-        {"name": "app/scripts/publish-fly-url.sh", "purpose": "tunnel.json을 fly.io URL로 게시 → Netlify 자동 리빌드"}
+        {
+          "name": "Git (GitHub)",
+          "purpose": "단일 리포 herwoojin/yt-dlp-woojini, master 브랜치 직접 푸시"
+        },
+        {
+          "name": "Netlify 배포",
+          "purpose": "git push → 자동 빌드/배포 (1~2분)"
+        },
+        {
+          "name": "Fly 배포",
+          "purpose": "수동 `cd app && fly deploy` (이미지 빌드 + push + 무중단 롤링)"
+        },
+        {
+          "name": "app/scripts/deploy-to-fly.sh",
+          "purpose": "최초 셋업용 멱등 스크립트 (앱 생성/볼륨/배포)"
+        },
+        {
+          "name": "app/scripts/publish-fly-url.sh",
+          "purpose": "tunnel.json을 fly.io URL로 게시 → Netlify 자동 리빌드"
+        }
       ]
     },
     {
       "name": "레거시 / 더 이상 사용 안 함",
       "items": [
-        {"name": "Cloudflare quick tunnel (cloudflared)", "purpose": "초기엔 로컬 백엔드를 외부 노출용. 지금은 Fly로 대체, launchd unload 완료"},
-        {"name": "macOS launchd plists", "purpose": "com.user.ytdlp-backend.plist / -tunnel.plist — 현재 unload 상태, 코드는 남아 있음"},
-        {"name": "tunnel-publisher.sh + healthcheck", "purpose": "터널 URL 자동 게시 + 좀비 터널 강제 재시작. 현재 비활성 (Fly URL은 고정)"}
+        {
+          "name": "Cloudflare quick tunnel (cloudflared)",
+          "purpose": "초기엔 로컬 백엔드를 외부 노출용. 지금은 Fly로 대체, launchd unload 완료"
+        },
+        {
+          "name": "macOS launchd plists",
+          "purpose": "com.user.ytdlp-backend.plist / -tunnel.plist — 현재 unload 상태, 코드는 남아 있음"
+        },
+        {
+          "name": "tunnel-publisher.sh + healthcheck",
+          "purpose": "터널 URL 자동 게시 + 좀비 터널 강제 재시작. 현재 비활성 (Fly URL은 고정)"
+        }
       ]
     }
   ]

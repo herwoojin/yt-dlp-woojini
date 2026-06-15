@@ -7,9 +7,16 @@ Gemini chapter generation.
 """
 from __future__ import annotations
 
+import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
+
+# M4(Apple Silicon)에서 GPU 가속 받아쓰기. 첫 호출 시 모델을 1회 다운로드한다.
+WHISPER_MODEL = os.getenv("WHISPER_MLX_MODEL", "mlx-community/whisper-large-v3-turbo")
 
 _VTT_TIME = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}")
 _SRT_TIME = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}")
@@ -54,6 +61,53 @@ def _parse_subtitle(path: Path) -> list[tuple[str, str]]:
             continue
         out.append((ts, text))
     return out
+
+
+def _sec_to_vtt(t: float) -> str:
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = t % 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+
+def transcribe_to_vtt(video_path: Path, job_dir: Path) -> Path | None:
+    """YouTube 자막을 못 받았을 때(429/자막없음) 영상 음성을 mlx-whisper로
+    직접 받아써서 VTT 파일을 만든다. 성공하면 VTT 경로, 실패하면 None.
+    이 VTT를 info['files']['subtitle']에 넣으면 기존 파이프라인이 그대로 동작한다."""
+    try:
+        import mlx_whisper
+    except Exception as exc:  # noqa: BLE001
+        log.warning("mlx_whisper import 실패 (받아쓰기 폴백 불가): %s", exc)
+        return None
+
+    try:
+        result = mlx_whisper.transcribe(
+            str(video_path),
+            path_or_hf_repo=WHISPER_MODEL,
+            word_timestamps=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("whisper 받아쓰기 실패: %s", exc)
+        return None
+
+    segments = result.get("segments") or []
+    if not segments:
+        log.warning("whisper: 세그먼트 없음")
+        return None
+
+    lines = ["WEBVTT", ""]
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        lines.append(f"{_sec_to_vtt(seg.get('start', 0.0))} --> {_sec_to_vtt(seg.get('end', 0.0))}")
+        lines.append(text)
+        lines.append("")
+
+    vtt_path = Path(job_dir) / "whisper.ko.vtt"
+    vtt_path.write_text("\n".join(lines), encoding="utf-8")
+    log.info("whisper 받아쓰기 완료: %d 세그먼트 → %s", len(segments), vtt_path.name)
+    return vtt_path
 
 
 def build_transcript_txt(job_dir: Path, info: dict[str, Any]) -> str:
