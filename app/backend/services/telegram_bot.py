@@ -158,8 +158,46 @@ def run_polling() -> None:
 
     threading.Thread(target=_bg_loop, daemon=True, name="tg-asyncio").start()
 
-    log.info("telegram bot polling started")
-    bot.infinity_polling(skip_pending=True)
+    # 자가복구 폴링 루프: infinity_polling은 WiFi가 끊겼다 붙으면 죽은 소켓에 물려
+    # 멈추는 일이 있다. 바운드 타임아웃 + 예외 시 재시도로 네트워크 복구 시 수초 내
+    # 자동 재개되게 직접 제어한다. 매 성공마다 heartbeat 파일을 갱신(감시 에이전트용).
+    heartbeat = "/tmp/ytdlp-tg-heartbeat"
+
+    def _hb():
+        try:
+            with open(heartbeat, "w") as fh:
+                fh.write(str(int(time.time())))
+        except Exception:
+            pass
+
+    # (재)시작 시 밀린 업데이트는 건너뛴다.
+    try:
+        pending = bot.get_updates(offset=-1, timeout=2, long_polling_timeout=1)
+        offset = (pending[-1].update_id + 1) if pending else None
+    except Exception:
+        offset = None
+
+    _hb()
+    log.info("telegram bot polling started (resilient loop, heartbeat=%s)", heartbeat)
+
+    fail_streak = 0
+    while True:
+        try:
+            updates = bot.get_updates(offset=offset, timeout=30, long_polling_timeout=25)
+            _hb()
+            fail_streak = 0
+            for u in updates:
+                offset = u.update_id + 1
+                try:
+                    bot.process_new_updates([u])
+                except Exception:
+                    log.exception("telegram update 처리 실패")
+        except Exception as exc:
+            fail_streak += 1
+            if fail_streak <= 3 or fail_streak % 10 == 0:
+                log.warning("telegram 폴링 일시 오류 #%d (네트워크 끊김?) 재시도: %s",
+                            fail_streak, str(exc)[:160])
+            time.sleep(3)
 
 
 def _wait_until_done(job_id: str, timeout: int = 1800):
