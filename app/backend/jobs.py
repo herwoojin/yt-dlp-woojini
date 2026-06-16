@@ -223,6 +223,50 @@ class JobRegistry:
         await self._queue.put((job_id, gemini_api_key))
         return job
 
+    # --- fly.dev 릴레이용: 맥 워커가 작업을 가져가고/결과를 올리는 메서드 ---
+    async def claim_remote_job(self) -> JobInfo | None:
+        """가장 오래된 PENDING 작업을 DOWNLOADING으로 표시하고 반환(맥 워커가 가져감)."""
+        async with self._lock:
+            pending = sorted(
+                (j for j in self._jobs.values() if j.status == JobStatus.PENDING),
+                key=lambda j: j.created_at,
+            )
+            if not pending:
+                return None
+            job = pending[0]
+            data = job.model_dump()
+            data["status"] = JobStatus.DOWNLOADING
+            data["message"] = "맥 워커가 처리 중..."
+            data["updated_at"] = datetime.utcnow()
+            new = JobInfo(**data)
+            self._jobs[job.id] = new
+            await self._persist(new)
+            return new
+
+    async def complete_remote_job(
+        self, job_id: str, content: bytes, filename: str, title: str | None, message: str
+    ) -> JobInfo | None:
+        """맥 워커가 올린 blog_long.html을 저장하고 작업을 DONE으로 표시."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        jdir = storage.job_dir(job_id)
+        (jdir / filename).write_bytes(content)
+        art = JobArtifact(kind="blog_long", filename=filename, size_bytes=len(content))
+        return await self._update(
+            job_id,
+            status=JobStatus.DONE,
+            progress=1.0,
+            title=title or job.title,
+            message=message,
+            artifacts=[*job.artifacts, art],
+        )
+
+    async def fail_remote_job(self, job_id: str, error: str) -> JobInfo | None:
+        return await self._update(
+            job_id, status=JobStatus.FAILED, message="원격 워커 처리 실패", error=error[:1000]
+        )
+
     async def _persist(self, job: JobInfo) -> None:
         jdir = storage.job_dir(job.id)
         (jdir / "job.json").write_text(job.model_dump_json(indent=2), encoding="utf-8")
@@ -250,6 +294,14 @@ class JobRegistry:
             return new_job
 
     async def start_worker(self) -> None:
+        if config.REMOTE_DISPATCH:
+            # fly.dev: 로컬 처리 워커를 띄우지 않는다(데이터센터 IP는 봇차단됨).
+            # 맥 워커가 claim해서 처리하므로, 재시작 시 중단된 작업만 PENDING으로 되돌린다.
+            for job in list(self._jobs.values()):
+                if job.status in (JobStatus.DOWNLOADING, JobStatus.TRANSCRIBING, JobStatus.GENERATING):
+                    await self._update(job.id, status=JobStatus.PENDING, progress=0.0,
+                                       message="대기 중 (맥 워커 연결 시 처리)")
+            return
         if self._worker_task is None:
             self._worker_task = asyncio.create_task(self._worker_loop())
         # 재시작으로 큐가 비워지면 pending/중단된 작업이 영원히 멈춘다 → 다시 큐에 넣는다.

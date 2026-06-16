@@ -16,8 +16,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .jobs import registry
-from .routes import files, jobs, settings
-from .services import telegram_bot
+from .routes import files, jobs, settings, worker
+from .services import remote_worker, telegram_bot
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend-html"
 
@@ -34,6 +34,9 @@ async def lifespan(app: FastAPI):
         log.info("telegram bot thread started")
     else:
         log.info("telegram bot disabled (no token or TELEGRAM_ENABLED=false)")
+    if config.REMOTE_WORKER_URL and config.WORKER_TOKEN:
+        threading.Thread(target=remote_worker.run_polling, daemon=True, name="remote-worker").start()
+        log.info("remote worker thread started (pull from %s)", config.REMOTE_WORKER_URL)
     yield
 
 
@@ -51,6 +54,7 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(settings.router)
 app.include_router(files.router)
+app.include_router(worker.router)
 
 
 @app.get("/health")

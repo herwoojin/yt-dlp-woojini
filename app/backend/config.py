@@ -74,6 +74,17 @@ DISK_KEEP_RECENT = int(os.getenv("DISK_KEEP_RECENT", "5"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
+# --- fly.dev 릴레이(맥 워커) 구조 ---
+# 회사 보안(Symantec)이 텔레그램을 막고, 회사망/VPN이 인바운드 터널을 깨므로,
+# fly.dev를 공개 창구로 두고 맥은 "아웃바운드로만" fly.dev에서 작업을 가져가 처리한다.
+#   - fly.dev:  REMOTE_DISPATCH=true → 로컬에서 다운로드 처리 안 함(데이터센터 IP 봇차단).
+#               제출된 작업은 PENDING으로 두고 /api/worker/* 로 맥에 넘긴다.
+#   - 맥:       REMOTE_WORKER_URL=https://ytdlp-25y.fly.dev → fly.dev에서 작업을 폴링해
+#               가정용 IP로 다운로드+블로그 생성 후 blog_long.html을 업로드.
+WORKER_TOKEN = os.getenv("WORKER_TOKEN", "")
+REMOTE_DISPATCH = os.getenv("REMOTE_DISPATCH", "false").lower() == "true"
+REMOTE_WORKER_URL = os.getenv("REMOTE_WORKER_URL", "").rstrip("/")
+
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
 ALLOW_INSECURE_AUTH = os.getenv("ALLOW_INSECURE_AUTH", "false").lower() == "true"
