@@ -7,6 +7,7 @@ Provides two capture modes:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -34,15 +35,49 @@ def _seconds_to_hms(sec: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+_FFMPEG_EXTRA_PATHS = [
+    # Windows: WinGet, Chocolatey, 직접 설치 위치
+    r"C:\Users\\" + os.environ.get("USERNAME", "") + r"\AppData\Local\Microsoft\WinGet\Links",
+    r"C:\ProgramData\chocolatey\bin",
+    r"C:\ffmpeg\bin",
+    r"C:\Program Files\ffmpeg\bin",
+    r"C:\Program Files (x86)\ffmpeg\bin",
+]
+
+
+def _find_ffmpeg() -> str | None:
+    """Return absolute path to ffmpeg, searching common locations if not in PATH."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for extra in _FFMPEG_EXTRA_PATHS:
+        if not extra:
+            continue
+        for name in ("ffmpeg", "ffmpeg.exe", "ffmpeg.EXE"):
+            candidate = os.path.join(extra, name)
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
+_FFMPEG_PATH: str | None = None
+
+
 def _ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    global _FFMPEG_PATH
+    if _FFMPEG_PATH is None:
+        _FFMPEG_PATH = _find_ffmpeg() or ""
+    return bool(_FFMPEG_PATH)
 
 
 def _can_encode_webp() -> bool:
     """Check if ffmpeg can encode WebP (libwebp)."""
+    ff = _find_ffmpeg()
+    if not ff:
+        return False
     try:
         r = subprocess.run(
-            ["ffmpeg", "-encoders"],
+            [ff, "-encoders"],
             capture_output=True, text=True, timeout=5,
         )
         return "libwebp" in r.stdout
@@ -89,7 +124,7 @@ def capture_frame(
     suffix = output_path.suffix.lower()
 
     cmd = [
-        "ffmpeg", "-y",
+        _FFMPEG_PATH, "-y",
         "-ss", timestamp,
         "-i", str(video_path),
         "-frames:v", "1",

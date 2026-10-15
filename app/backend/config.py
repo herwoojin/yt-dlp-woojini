@@ -60,10 +60,21 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-2.5-flash")
 PRO_GEMINI_MODEL = os.getenv("PRO_GEMINI_MODEL", "gemini-2.5-pro")
 # Gemini 호출당 타임아웃(초). 초과 시 예외 → 작업이 60%에서 무한 대기하지 않음.
-GEMINI_TIMEOUT_SEC = int(os.getenv("GEMINI_TIMEOUT_SEC", "120"))
+# 1시간+ 영상은 자막이 길고 심층/검색 생성이 오래 걸리므로 넉넉히(기본 10분).
+GEMINI_TIMEOUT_SEC = int(os.getenv("GEMINI_TIMEOUT_SEC", "600"))
 # Gemini 429(쿼터/RPM)·5xx 일시 오류 시 백오프 재시도. 무료 등급 분당 한도 대응.
 GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "4"))
 GEMINI_RETRY_BASE_SEC = int(os.getenv("GEMINI_RETRY_BASE_SEC", "15"))
+# 응답 최대 출력 토큰. 기본(미설정) 시 thinking이 예산을 잠식해 본문이 잘리거나 비는
+# 문제가 있어 명시적으로 크게 잡는다(2.5 모델 상한 = 65536). 긴 글이 중간에 안 끊기게.
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "65536"))
+# thinking(추론) 토큰 예산 상한. 출력 토큰을 잠식하지 않도록 제한(2.5 pro/flash 공통 유효값).
+GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "8192"))
+# 한 응답이 상한(MAX_TOKENS)에 걸려 잘리면 자동으로 이어쓰기하는 최대 횟수.
+GEMINI_MAX_CONTINUATIONS = int(os.getenv("GEMINI_MAX_CONTINUATIONS", "3"))
+# Gemini에 넣는 자막 최대 글자수. 2.5 모델은 컨텍스트가 매우 커서(≈100만 토큰) 1시간+
+# 영상 자막도 통째로 넣을 수 있다. 예전 5만자 절단은 긴 영상의 중간 내용을 버렸음.
+GEMINI_TRANSCRIPT_MAX_CHARS = int(os.getenv("GEMINI_TRANSCRIPT_MAX_CHARS", "200000"))
 
 # 디스크 자동 정리: 사용률이 HIGH% 이상이면 영상 다운로드 전에 오래된 작업부터
 # TARGET% 아래까지 삭제한다(최근 KEEP개와 진행 중 작업은 항상 보존).

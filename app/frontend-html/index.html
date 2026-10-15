@@ -38,9 +38,15 @@
   // 두 값이 다르면 Netlify가 리빌드 중이라고 판단하고 진행 배너를 표시한다.
   const GITHUB_RAW_TUNNEL = 'https://raw.githubusercontent.com/herwoojin/yt-dlp-woojini/master/app/frontend-html/tunnel.json'
 
+  function fetchWithTimeout(url, init = {}, timeoutMs = 8000) {
+    const ctrl = new AbortController()
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs)
+    return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(tid))
+  }
+
   async function fetchTunnelJson(url) {
     try {
-      const r = await fetch(url, { cache: 'no-store' })
+      const r = await fetchWithTimeout(url, { cache: 'no-store' }, 5000)
       if (!r.ok) return null
       const j = await r.json()
       if (!j || !j.base) return null
@@ -68,6 +74,18 @@
     return s ? s.canonical.base : null
   }
 
+  const _LOCAL_CANDIDATES = ['http://localhost:8000', 'http://127.0.0.1:8000']
+
+  async function _probeLocal() {
+    for (const url of _LOCAL_CANDIDATES) {
+      try {
+        const r = await fetchWithTimeout(url + '/health', {}, 2000)
+        if (r.ok) return url
+      } catch (_) {}
+    }
+    return null
+  }
+
   async function ensureBase() {
     const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname) || window.location.hostname.startsWith('192.168.') || window.location.hostname.startsWith('10.');
     if (isLocal && !cfg.base) {
@@ -78,12 +96,17 @@
     }
     // 사용자가 명시적으로 설정한 base가 있으면 그것을 우선
     if (cfg.base) { BASE = cfg.base.replace(/\/$/, ''); BASE_SOURCE = 'localStorage'; return }
+    // 터널 URL 자동 발견 시도
     const s = await checkRebuildState()
     if (s) {
       BASE = s.canonical.base
       BASE_SOURCE = 'auto'
       if (s.rebuilding) startRebuildBanner(s)
+      return
     }
+    // 터널 URL도 없으면 로컬 백엔드(localhost:8000) 탐색
+    const local = await _probeLocal()
+    if (local) { BASE = local; BASE_SOURCE = 'local-detection' }
   }
 
   // ─── 리빌드 진행 배너 ───────────────────────────────
@@ -124,7 +147,7 @@
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
     if (GEMINI_KEY) headers['X-Gemini-Key'] = GEMINI_KEY
     try {
-      return await _parseResp(await fetch(BASE + path, { ...init, headers }))
+      return await _parseResp(await fetchWithTimeout(BASE + path, { ...init, headers }, 10000))
     } catch (err) {
       // 실패 시 후보 순서대로 시도: ① tunnel.json 자동발견 ② 고정 fly.dev fallback
       // (localStorage/터널 URL이 죽어 있어도 자동 복구)
@@ -140,7 +163,7 @@
         const attempts = cand === FALLBACK_BASE ? 2 : 1
         for (let k = 0; k < attempts; k++) {
           try {
-            const res = await _parseResp(await fetch(cand + path, { ...init, headers }))
+            const res = await _parseResp(await fetchWithTimeout(cand + path, { ...init, headers }, 10000))
             BASE = cand
             BASE_SOURCE = 'auto'
             return res
@@ -272,18 +295,29 @@
     connState.everConnected = true
     connState.failStreak = 0
     connState.lastError = null
+    _refreshInterval = 3000  // 성공 시 빠른 폴링으로 복귀
     setConnStatus('ok')
   }
 
   function onConnectionFailed(err) {
     connState.failStreak++
     connState.lastError = err && err.message ? err.message : String(err)
-    // 자가복구: 저장된 주소가 계속 실패하고, 자동 발견된 정답 주소가 다르면 그쪽으로 전환
+    // 지수 백오프: 실패 횟수에 따라 재시도 간격을 늘린다
+    // 1-2회: 3s, 3-4회: 10s, 5-6회: 30s, 7회+: 60s
+    const s = connState.failStreak
+    _refreshInterval = s >= 7 ? 60000 : s >= 5 ? 30000 : s >= 3 ? 10000 : 3000
+    // 자가복구: 저장된 주소가 계속 실패하면 순서대로 대안 시도
     if (connState.failStreak >= 2 && CANONICAL_BASE && CANONICAL_BASE !== BASE) {
       BASE = CANONICAL_BASE
       BASE_SOURCE = 'auto'
     } else if (connState.failStreak === 2 && !CANONICAL_BASE) {
       discoverTunnelUrl().catch(() => {})  // 다음 주기에 CANONICAL_BASE 사용 가능하도록
+    }
+    // 3회 이상 실패 시 localhost:8000 백엔드가 로컬에서 실행 중인지 탐색
+    if (connState.failStreak === 3 && !_LOCAL_CANDIDATES.includes(BASE)) {
+      _probeLocal().then(local => {
+        if (local) { BASE = local; BASE_SOURCE = 'local-detection' }
+      }).catch(() => {})
     }
     if (!BASE) {
       setConnStatus('no-base', '⚠️ 백엔드 URL이 설정되지 않았습니다. <strong>⚙️ 설정</strong> 버튼을 눌러 입력하세요.')
@@ -293,23 +327,29 @@
       return
     }
     const short = connState.lastError.slice(0, 100)
+    const nextSec = Math.round(_refreshInterval / 1000)
+    const retryNote = nextSec >= 10 ? ` · ${nextSec}초 후 재시도` : ''
     if (!connState.everConnected) {
       // 한 번도 연결된 적 없음 → 큰 실패 상태
       setConnStatus('failed',
-        `❌ 백엔드에 연결할 수 없습니다 <span style="opacity:.7">(${connState.failStreak}회 시도)</span><br>` +
+        `❌ 백엔드에 연결할 수 없습니다 <span style="opacity:.7">(${connState.failStreak}회 시도${retryNote})</span><br>` +
         `<span style="font-size:11px;opacity:.7">${escape(BASE)} — ${escape(short)}</span>`)
       list.innerHTML = `<li style="color:#94a3b8;text-align:center;padding:32px">
         ❌ 백엔드에 연결할 수 없습니다 (${connState.failStreak}회 시도)
-        <div style="font-size:11px;margin-top:8px">맥북에서 cloudflared/uvicorn이 실행 중인지 확인하세요</div>
+        <div style="font-size:11px;margin-top:8px">백엔드 서버(uvicorn)가 실행 중인지 확인하세요 — 로컬 실행 시 <code>http://localhost:8000</code>을 ⚙️ 설정에서 입력하세요</div>
+        <div style="font-size:11px;margin-top:4px;opacity:.7">${escape(BASE)}</div>
       </li>`
     } else {
       // 이전엔 연결됐었음 → 작은 배너만, 작업 목록 유지
       setConnStatus('failed',
-        `⚠️ 연결 일시 끊김 <span style="opacity:.7">(${connState.failStreak}회 재시도 중)</span>`)
+        `⚠️ 연결 일시 끊김 <span style="opacity:.7">(${connState.failStreak}회 재시도 중${retryNote})</span>`)
     }
   }
 
   async function forceReconnect() {
+    connState.failStreak = 0
+    connState.lastError = null
+    _refreshInterval = 3000
     setConnStatus('connecting', '🔄 새 URL 확인 중…')
     // localStorage override 무시하고 GitHub raw에서 강제 재발견
     const s = await checkRebuildState()
@@ -545,12 +585,20 @@
 
   // ─── 앱 시작 ─────────────────────────────────────────
   let refreshTimer = null
+  let _refreshInterval = 3000  // 실패 시 지수 백오프로 늘어남
+
   function startRefreshLoop() {
     if (refreshTimer) return
-    refreshTimer = setInterval(refresh, 3000)
+    const _tick = async () => {
+      await refresh()
+      if (refreshTimer !== null) {
+        refreshTimer = setTimeout(_tick, _refreshInterval)
+      }
+    }
+    refreshTimer = setTimeout(_tick, _refreshInterval)
   }
   function pauseRefresh() {
-    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null }
   }
 
   function startApp() {

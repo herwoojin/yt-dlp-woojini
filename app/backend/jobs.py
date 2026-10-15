@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 def _wrap_html(title: str, body_fragment: str) -> str:
     """Gemini는 HTML 조각만 반환하므로, charset/스타일이 포함된 완전한 HTML5
     문서로 감싸 디스크에 저장한다. 그러지 않으면 다운로드해서 브라우저로 열 때
-    한글이 인코딩 불일치로 깨져 보임."""
+    한글이 인코딩 불일치로 깨져 보임.
+    제목(title)을 <h1>으로 파일 맨 앞에 배치해서, 파일을 열자마자 제목이 보이도록 한다."""
     safe_title = (title or "yt-dlp").replace("<", "&lt;").replace(">", "&gt;")
     return (
         "<!doctype html>\n"
@@ -45,6 +46,7 @@ def _wrap_html(title: str, body_fragment: str) -> str:
         "  </style>\n"
         "</head>\n"
         "<body>\n"
+        f'<h1 style="font-size:22px;margin-bottom:20px;color:#111827">{safe_title}</h1>\n'
         f"{body_fragment}\n"
         "</body>\n"
         "</html>\n"
@@ -76,7 +78,7 @@ class JobRegistry:
         """사용자가 선택한 산출물만 남기는 필터.
         blog_long/blog_image는 항상 유지, info_json/subtitle은 항상 숨김.
         _update에서 자동 호출되어 모든 상태(진행 중 포함)에 일관 적용된다."""
-        _ALWAYS_KEEP = {"blog_long", "blog_image"}
+        _ALWAYS_KEEP = {"blog_long", "blog_image", "blog_naver", "naver_image"}
         _ALWAYS_HIDE = {"info_json", "subtitle"}
         _KEYMAP = {
             "video": "video",
@@ -202,6 +204,10 @@ class JobRegistry:
         owner_uid: str,
         gemini_api_key: str | None = None,
         outputs: list[str] | None = None,
+        naver_mode: bool = False,
+        deep_research: bool = False,
+        lang_study: bool = False,
+        study_lang: str | None = None,
     ) -> JobInfo:
         job_id = uuid.uuid4().hex[:12]
         now = datetime.utcnow()
@@ -215,6 +221,10 @@ class JobRegistry:
             updated_at=now,
             owner_uid=owner_uid,
             outputs=outputs,
+            naver_mode=naver_mode,
+            deep_research=deep_research,
+            lang_study=lang_study,
+            study_lang=study_lang,
         )
         self._jobs[job_id] = job
         if gemini_api_key:
@@ -236,7 +246,7 @@ class JobRegistry:
             job = pending[0]
             data = job.model_dump()
             data["status"] = JobStatus.DOWNLOADING
-            data["message"] = "맥 워커가 처리 중..."
+            data["message"] = "작업 PC가 접수했습니다 — 영상 다운로드 시작"
             data["updated_at"] = datetime.utcnow()
             new = JobInfo(**data)
             self._jobs[job.id] = new
@@ -244,28 +254,67 @@ class JobRegistry:
             return new
 
     async def complete_remote_job(
-        self, job_id: str, content: bytes, filename: str, title: str | None, message: str
+        self, job_id: str, content: bytes, filename: str, title: str | None, message: str,
+        naver_extras: list[tuple[str, bytes]] | None = None,
     ) -> JobInfo | None:
-        """맥 워커가 올린 blog_long.html을 저장하고 작업을 DONE으로 표시."""
+        """맥 워커가 올린 blog_long.html(+네이버 extras)을 저장하고 작업을 DONE으로 표시."""
         job = self._jobs.get(job_id)
         if job is None:
             return None
         jdir = storage.job_dir(job_id)
         (jdir / filename).write_bytes(content)
         art = JobArtifact(kind="blog_long", filename=filename, size_bytes=len(content))
+        artifacts = [*job.artifacts, art]
+        if naver_extras:
+            for fname, fdata in naver_extras:
+                (jdir / fname).write_bytes(fdata)
+                kind = "blog_naver" if fname.endswith(".html") else "naver_image"
+                artifacts.append(JobArtifact(kind=kind, filename=fname, size_bytes=len(fdata)))
         return await self._update(
             job_id,
             status=JobStatus.DONE,
             progress=1.0,
             title=title or job.title,
             message=message,
-            artifacts=[*job.artifacts, art],
+            artifacts=artifacts,
         )
 
     async def fail_remote_job(self, job_id: str, error: str) -> JobInfo | None:
         return await self._update(
             job_id, status=JobStatus.FAILED, message="원격 워커 처리 실패", error=error[:1000]
         )
+
+    _RELAY_STATUS = {
+        "downloading": JobStatus.DOWNLOADING,
+        "transcribing": JobStatus.TRANSCRIBING,
+        "generating": JobStatus.GENERATING,
+    }
+
+    async def update_remote_progress(
+        self, job_id: str, status: str = "", message: str = "",
+        progress: float = -1.0, title: str = "",
+    ) -> JobInfo | None:
+        """워커 PC가 처리 중 보내는 진행 상황(단계/메시지/진행률/제목)을 fly 쪽
+        작업에 반영한다 — 텔레그램 실시간 진행 알림용. 종료 상태(DONE/FAILED)는
+        result/fail 엔드포인트 전용이므로 여기서는 진행 단계만 허용."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        if job.status in (JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED):
+            return job  # 뒤늦게 도착한 진행 신호가 종료 상태를 덮지 않게
+        fields: dict = {}
+        st = self._RELAY_STATUS.get((status or "").lower())
+        if st is not None:
+            fields["status"] = st
+        if message:
+            fields["message"] = message
+        if 0.0 <= progress <= 1.0:
+            fields["progress"] = progress
+        if title:
+            fields["title"] = title
+        if not fields:
+            return job
+        return await self._update(job_id, **fields)
 
     async def _persist(self, job: JobInfo) -> None:
         jdir = storage.job_dir(job.id)
@@ -300,7 +349,7 @@ class JobRegistry:
             for job in list(self._jobs.values()):
                 if job.status in (JobStatus.DOWNLOADING, JobStatus.TRANSCRIBING, JobStatus.GENERATING):
                     await self._update(job.id, status=JobStatus.PENDING, progress=0.0,
-                                       message="대기 중 (맥 워커 연결 시 처리)")
+                                       message="대기 중 (작업 PC 연결 시 처리)")
             return
         if self._worker_task is None:
             self._worker_task = asyncio.create_task(self._worker_loop())
@@ -392,13 +441,40 @@ class JobRegistry:
         except Exception as exc:
             msg = "영상 다운로드에 실패했습니다."
             exc_str = str(exc).lower()
-            if "drm" in exc_str:
+            tb_str = traceback.format_exc().lower()
+            combined = exc_str + " " + tb_str
+            if "drm" in combined:
                 msg = "이 영상은 DRM으로 보호된 유료/저작권 영상이라 다운로드할 수 없습니다."
-            elif "sign in" in exc_str or "members-only" in exc_str:
-                msg = "이 영상은 로그인이 필요하거나 회원 전용 영상이라 다운로드할 수 없습니다."
-            elif "private" in exc_str:
+            elif "no longer valid" in combined or "쿠키가 만료" in combined:
+                # 쿠키가 브라우저에서 로테이션돼 무효화됨 — 시크릿창 재발급이 확실한 해결책
+                msg = ("YouTube 쿠키가 만료/무효화되었습니다. 시크릿(Incognito) 창에서 "
+                       "쿠키를 재발급해 주세요 (텔레그램에 '쿠키 설정' 입력).")
+            elif "not a bot" in combined or ("sign in" in combined and "confirm" in combined):
+                # YouTube bot detection — fixable with cookies
+                msg = "YouTube 봇 탐지 차단: 유튜브 쿠키를 설정하면 해결됩니다 (텔레그램에 '쿠키 설정' 입력)."
+            elif "members-only" in combined or "member" in combined:
+                msg = "이 영상은 회원 전용(유료 멤버십) 영상이라 다운로드할 수 없습니다."
+            elif "sign in" in combined or "login required" in combined:
+                msg = "이 영상은 로그인이 필요합니다. 쿠키를 설정하면 해결될 수 있습니다 (텔레그램에 '쿠키 설정' 입력)."
+            elif "private" in combined:
                 msg = "이 영상은 비공개 영상이라 다운로드할 수 없습니다."
-            
+            elif "requested format is not available" in combined:
+                # YouTube가 해당 화질/포맷 조합을 더는 주지 않는 경우(progressive mp4 소멸 등).
+                msg = "요청한 화질/포맷을 YouTube가 제공하지 않습니다. 잠시 후 다시 시도해주세요."
+            elif "po token" in combined or "sabr" in combined:
+                msg = ("YouTube PO Token 발급에 실패했습니다. bgutil PO Token 공급자가 "
+                       "동작 중인지 확인해 주세요.")
+            elif "429" in combined or "too many request" in combined:
+                msg = "YouTube가 요청을 너무 많이 받아 차단했습니다(429). 잠시 후 다시 시도해주세요."
+            elif "403" in combined or "forbidden" in combined:
+                msg = "YouTube가 이 영상 다운로드를 거부했습니다(403). 쿠키 설정이 필요할 수 있습니다."
+            elif "unavailable" in combined or "video unavailable" in combined:
+                msg = "이 영상은 현재 이용할 수 없습니다(지역 차단 또는 삭제된 영상)."
+            elif "no video formats" in combined or "no formats" in combined:
+                msg = "다운로드 가능한 영상 포맷이 없습니다. 유료 콘텐츠이거나 지역 제한이 있을 수 있습니다."
+            elif "http error" in combined or "connection" in combined or "network" in combined:
+                msg = "네트워크 오류로 다운로드에 실패했습니다. 잠시 후 다시 시도해주세요."
+
             log.warning("video download failed for job %s: %s", job_id, exc)
             await self._update(job_id, status=JobStatus.FAILED, message=msg, error=traceback.format_exc())
             return
@@ -469,11 +545,15 @@ class JobRegistry:
 
         if self.is_cancelled(job_id):
             return
+        gen_msg = ("📚 언어학습 버전 작성 중 — 스크립트 원문 보존 + 번역/핵심표현 정리"
+                   if job.lang_study else
+                   "🔬 딥리서치 진행 중 — 웹 검색으로 배경 조사 + 심층 장문 작성 (수 분 소요)"
+                   if job.deep_research else "Gemini로 목차/요약/HTML 생성 중")
         await self._update(
             job_id,
             status=JobStatus.GENERATING,
             progress=0.6,
-            message="Gemini로 목차/요약/HTML 생성 중",
+            message=gen_msg,
             artifacts=artifacts,
         )
         try:
@@ -484,6 +564,11 @@ class JobRegistry:
                 job.quality,
                 api_key=gemini_api_key,
                 wants=wants,
+                naver=job.naver_mode,
+                deep_research=job.deep_research,
+                lang_study=job.lang_study,
+                study_lang=job.study_lang,
+                duration=info.get("duration"),
             )
         except Exception as exc:
             reason = str(exc)
@@ -545,6 +630,21 @@ class JobRegistry:
         to_write: list[tuple[str, str]] = [
             ("blog_long.html", _wrap_html(video_title + " — 블로그", results["blog_html"])),
         ]
+
+        # 네이버 블로그 최적화 HTML (요청 시에만 생성)
+        if job.naver_mode and results.get("naver_blog_html"):
+            # 네이버용 이미지 캡처 (base64 임베드 X — 파일 그대로 유지)
+            try:
+                artifacts, _naver_html = await self._run_naver_screenshots(
+                    jdir, info, results, artifacts,
+                )
+            except Exception as exc:
+                log.warning("naver screenshot step failed (non-fatal): %s", exc)
+
+            to_write.append((
+                "blog_naver.html",
+                _wrap_html(video_title + " — 네이버 블로그", results["naver_blog_html"]),
+            ))
         if want("chapters"):
             to_write.append(("chapters.json", json.dumps(results["chapters"], ensure_ascii=False, indent=2)))
         if results.get("summary_short_html"):  # wants에 summary 포함됐을 때만 생성됨
@@ -567,6 +667,46 @@ class JobRegistry:
             artifacts=artifacts,
             chapters=results["chapters"],
         )
+
+    async def _run_naver_screenshots(
+        self,
+        jdir: Path,
+        info: dict,
+        results: dict,
+        artifacts: list[JobArtifact],
+    ) -> tuple[list[JobArtifact], str]:
+        """Capture Naver blog images — kept as separate JPG files (no base64 embedding),
+        so they can be sent individually via Telegram for manual insertion into Naver editor."""
+        naver_html = results.get("naver_blog_html") or ""
+        naver_timestamps = results.get("naver_image_timestamps", [])
+        if not naver_timestamps:
+            return artifacts, naver_html
+
+        video_path = self._find_video(jdir)
+        if not video_path:
+            return artifacts, naver_html
+
+        naver_dir = jdir  # save in same dir
+        for item in naver_timestamps:
+            idx = item.get("index", 0)
+            ts = item.get("timestamp", "00:00:10")
+            filename = f"naver_img_{idx}.jpg"
+            out_path = naver_dir / filename
+
+            sec = screenshot._hms_to_seconds(ts) + 3
+            adjusted_ts = screenshot._seconds_to_hms(sec)
+
+            if screenshot.capture_frame(video_path, adjusted_ts, out_path):
+                artifacts.append(JobArtifact(
+                    kind="naver_image",
+                    filename=filename,
+                    size_bytes=out_path.stat().st_size,
+                ))
+                log.info("captured naver image %s at %s", filename, adjusted_ts)
+            else:
+                log.warning("failed to capture naver image %d at %s", idx, adjusted_ts)
+
+        return artifacts, naver_html
 
     async def _run_screenshots(
         self,

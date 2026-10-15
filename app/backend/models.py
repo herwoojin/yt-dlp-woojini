@@ -37,6 +37,10 @@ class JobCreateRequest(BaseModel):
         description="생성할 산출물 키 목록(video,transcript,screenshots,chapters,summary,email). "
                     "blog(블로그 long+복사)은 항상 생성. None이면 전부 생성(하위호환).",
     )
+    study_lang: str | None = Field(
+        default=None,
+        description="언어학습 버전에서 배울 목표 언어(예: 일본어/중국어/영어). None이면 자동 판별.",
+    )
 
 
 class JobArtifact(BaseModel):
@@ -62,6 +66,12 @@ class JobInfo(BaseModel):
     artifacts: list[JobArtifact] = Field(default_factory=list)
     chapters: list[dict[str, Any]] = Field(default_factory=list)
     duration_seconds: int | None = None
+    naver_mode: bool = False
+    deep_research: bool = False
+    lang_study: bool = False  # 언어학습 버전(스크립트 원문 보존 학습용)
+    # 언어학습에서 "무슨 언어를 배우는가". 영상 음성 언어가 아니라 *학습 목표* 언어다.
+    # (한국어 강의로 일본어를 가르치는 영상이 많아 자동 판별은 한국어로 오인한다)
+    study_lang: str | None = None
 
 
 class SettingsResponse(BaseModel):
